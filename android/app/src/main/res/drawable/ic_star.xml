@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Estrella de 4 puntas con halo suave -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#1FFFFFFF"
+        android:pathData="M54,22 Q58,50 86,54 Q58,58 54,86 Q50,58 22,54 Q50,50 54,22Z" />
+    <path android:fillColor="#FFF4F1FF"
+        android:pathData="M54,32 Q56.5,51.5 76,54 Q56.5,56.5 54,76 Q51.5,56.5 32,54 Q51.5,51.5 54,32Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M54,50 a4,4 0 1,1 0,8 a4,4 0 1,1 0,-8Z" />
+</vector>

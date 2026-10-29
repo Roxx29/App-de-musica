@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fondo del icono: #0B0B0F con un resplandor violeta tenue al centro -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:type="radial" android:gradientRadius="60%p"
+        android:startColor="#FF2A2540" android:endColor="#FF0B0B0F" />
+</shape>

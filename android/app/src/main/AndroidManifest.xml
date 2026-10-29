@@ -2,17 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:label="BrilloMusical"
-        android:icon="@android:drawable/star_big_on"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Brillo">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".SettingsActivity" />
         <activity android:name=".LyricsActivity" android:screenOrientation="unspecified" />
         <service
             android:name=".MusicListener"
