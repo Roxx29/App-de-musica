@@ -42,14 +42,16 @@ class MusicListener : NotificationListenerService() {
         update()
     }
 
-    override fun onListenerDisconnected() {
+    override fun onListenerDisconnected() = cleanup()
+
+    private fun cleanup() {
         getSystemService(MediaSessionManager::class.java).removeOnActiveSessionsChangedListener(sessions)
-        controller?.unregisterCallback(callback)
+        controller?.unregisterCallback(callback); controller = null
         main.removeCallbacks(retry)
         glow?.hide(); glow = null
     }
 
-    override fun onDestroy() { net.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() { cleanup(); net.shutdownNow(); super.onDestroy() }
 
     private fun attach(list: List<MediaController>?) {
         val c = list?.firstOrNull { it.packageName == YT_MUSIC }
@@ -119,6 +121,7 @@ class MusicListener : NotificationListenerService() {
         val (t, a, d) = Triple(NowPlaying.title, NowPlaying.artist, NowPlaying.durationMs)
         val al = album
         val dir = File(cacheDir, "lyrics")
+        if (net.isShutdown) return // servicio destruido
         NowPlaying.lyricsState = NowPlaying.LyricsState.LOADING
         net.execute {
             if (key != lyricsKey) return@execute // ya cambió de canción mientras esperaba

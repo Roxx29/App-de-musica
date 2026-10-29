@@ -16,6 +16,7 @@ object NowPlaying {
     var ad = false
     var lines: List<Lyrics.Line> = emptyList()
     var lyricsState = LyricsState.NONE
+    var lyricsOpen = false // nuestra pantalla de letra está delante: el borde no se oculta
     enum class LyricsState { NONE, LOADING, FOUND, NOT_FOUND, OFFLINE }
 
     /** Clave de la canción (desfase por canción, caché). */
@@ -24,11 +25,15 @@ object NowPlaying {
     private var posMs = 0L
     private var stamp = 0L
     private var speed = 1f
+    private var stampPlaying = false
     private val listeners = mutableListOf<() -> Unit>()
 
     fun setPosition(pos: Long, updateTime: Long, playbackSpeed: Float) {
-        // algunas sesiones no dan la hora de la actualización: se toma ahora
-        posMs = pos; stamp = if (updateTime > 0) updateTime else SystemClock.elapsedRealtime(); speed = playbackSpeed
+        // sin hora de la sesión: "ahora" solo si cambió algo (si no, cada evento congelaría el avance)
+        if (updateTime > 0) stamp = updateTime
+        else if (pos != posMs || stamp == 0L || playing != stampPlaying) stamp = SystemClock.elapsedRealtime()
+        stampPlaying = playing
+        posMs = pos; speed = if (playbackSpeed > 0f) playbackSpeed else 1f // algunas sesiones dan 0 sonando
     }
 
     /** Posición para la letra: extrapolada + desfase manual de la canción. */

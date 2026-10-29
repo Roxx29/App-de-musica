@@ -75,7 +75,8 @@ object Lyrics {
         artist.split(Regex(""",|&| feat\.? | ft\.? """, RegexOption.IGNORE_CASE))[0].trim()
 
     fun isAd(title: String, artist: String, album: String, durationMs: Long): Boolean =
-        artist.isBlank() || AD.containsMatchIn(title) || (durationMs in 1 until 35_000 && album.isEmpty())
+        // sin artista no basta: hace falta el patrón o ser corto (sin álbum o sin artista)
+        AD.containsMatchIn(title) || (durationMs in 1 until 35_000 && (album.isEmpty() || artist.isBlank()))
 
     /** syncedLyrics de la versión con duración más parecida (±3 s); sin duración, la primera. pares: (segundos, lrc). */
     fun pick(found: List<Pair<Double, String>>, durationSec: Double): String? {

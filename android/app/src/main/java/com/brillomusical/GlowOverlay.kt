@@ -51,6 +51,7 @@ class GlowOverlay(private val ctx: Context) {
         private val shaders = Array(4) { BitmapShader(ribbon, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
         private val bands = Array(4) { Rect() } // arriba, derecha, abajo, izquierda
         private var mask: Bitmap? = null
+        private var built: List<Any?>? = null // tamaño y cutout de la máscara actual
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * resources.displayMetrics.density }
         private val outline = Path()
@@ -78,11 +79,12 @@ class GlowOverlay(private val ctx: Context) {
             Choreographer.getInstance().removeFrameCallback(this); running = false
         }
 
-        override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) = build()
+        override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) { post { build() } } // tras los insets nuevos
 
         override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
             // app delante a pantalla completa = barra de estado oculta
-            if (Build.VERSION.SDK_INT >= 30) fx.hidden = !insets.isVisible(WindowInsets.Type.statusBars())
+            if (Build.VERSION.SDK_INT >= 30) fx.hidden = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top > 0 &&
+                !insets.isVisible(WindowInsets.Type.statusBars()) // sin barra de estado (p. ej. horizontal) no cuenta
             post { build(); refresh() } // rootWindowInsets ya actualizado
             return insets
         }
@@ -126,6 +128,9 @@ class GlowOverlay(private val ctx: Context) {
             val w = width; val h = height
             if (w == 0 || h == 0) return
             val ins = rootWindowInsets
+            val key = listOf(w, h, if (Build.VERSION.SDK_INT >= 28) ins?.displayCutout else null)
+            if (key == built) return // mismo tamaño y cutout: la máscara vale
+            built = key
             val r = FloatArray(8)
             if (Build.VERSION.SDK_INT >= 31 && ins != null)
                 intArrayOf(RoundedCorner.POSITION_TOP_LEFT, RoundedCorner.POSITION_TOP_RIGHT,

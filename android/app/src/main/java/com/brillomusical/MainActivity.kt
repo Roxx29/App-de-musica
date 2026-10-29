@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -43,9 +44,21 @@ class MainActivity : Activity() {
     override fun onStart() { super.onStart(); NowPlaying.listen(onNow) }
     override fun onStop() { super.onStop(); NowPlaying.unlisten(onNow) }
 
-    private fun openMusic() = startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-    private fun openOverlay() = startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-    private fun openBattery() = startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+    private fun openMusic() = open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+    private fun openOverlay() = open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+    private fun openBattery() = open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+    private fun openAppInfo() = open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+
+    /** Algunos fabricantes no tienen esa pantalla: se abre Info de la app. */
+    private fun open(i: Intent) {
+        try { startActivity(i) } catch (e: Exception) {
+            try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (e: Exception) {}
+        }
+    }
+
+    // Android 13+ bloquea este permiso en apps instaladas a mano
+    private val restricted = if (Build.VERSION.SDK_INT >= 33)
+        "¿Aparece «Ajuste restringido»? Abre Info de la app, toca ⋮ y elige «Permitir ajustes restringidos»." else null
 
     private fun go(next: Int) {
         if (next > 3 || (next == 3 && hasBattery)) { Prefs.onboarded = true; home(); return }
@@ -83,8 +96,12 @@ class MainActivity : Activity() {
             }
             1 -> {
                 write("Ver qué suena", "Leemos el título y la portada de lo que suena en YouTube Music para buscar la letra por título. No guardamos nada fuera de tu teléfono.",
-                    "Busca BrilloMusical y actívalo.", if (hasMusic) "Listo, ya te escucho." else null)
-                if (hasMusic) act("Seguir") { go(2) } else { act("Activar") { openMusic() }; act("Ahora no", false) { go(2) } }
+                    "Busca BrilloMusical y actívalo." + (restricted?.let { "\n\n$it" } ?: ""), if (hasMusic) "Listo, ya te escucho." else null)
+                if (hasMusic) act("Seguir") { go(2) } else {
+                    act("Activar") { openMusic() }
+                    if (restricted != null) act("Abrir Info de la app", false) { openAppInfo() }
+                    act("Ahora no", false) { go(2) }
+                }
             }
             2 -> {
                 write("Brillo sobre tus apps", "Dibuja un borde de luz encima de lo que uses. Puedes apagarlo cuando quieras.",
@@ -139,12 +156,14 @@ class MainActivity : Activity() {
         col.addView(glow, full(12))
 
         // Permisos que faltan
-        if (!hasMusic) col.addView(fix("Ver qué suena", "Sin este permiso no sabemos qué suena.") { openMusic() }, full(12))
+        if (!hasMusic) col.addView(fix("Ver qué suena", "Sin este permiso no sabemos qué suena.") { openMusic() }.apply {
+            restricted?.let { addView(text(it, Ui.Type.BODY, Ui.TEXT3)); addView(button("Abrir Info de la app", false) { openAppInfo() }, full(8)) }
+        }, full(12))
         if (!hasOverlay) col.addView(fix("Brillo sobre tus apps", "Sin este permiso el borde de luz no se ve.") { openOverlay() }, full(12))
 
         col.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f)) // empuja los botones abajo
-        col.addView(button("Ver la letra") { startActivity(Intent(this, LyricsActivity::class.java)) }, full(24))
-        col.addView(button("Ajustes", false) { startActivity(Intent(this, SettingsActivity::class.java)) }, full(8))
+        col.addView(button("Ver la letra") { open(Intent(this, LyricsActivity::class.java)) }, full(24))
+        col.addView(button("Ajustes", false) { open(Intent(this, SettingsActivity::class.java)) }, full(8))
         showNow()
     }
 

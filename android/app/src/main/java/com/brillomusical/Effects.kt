@@ -40,7 +40,7 @@ class Effects {
     }
 
     private fun target() = when {
-        !Prefs.glowOn || hidden || NowPlaying.title.isEmpty() || NowPlaying.ad -> 0f
+        !Prefs.glowOn || (hidden && !NowPlaying.lyricsOpen) || NowPlaying.title.isEmpty() || NowPlaying.ad -> 0f
         NowPlaying.playing -> 1f
         else -> 0.5f
     }

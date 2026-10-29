@@ -39,7 +39,8 @@ class LyricsTest {
 
     @Test fun isAd() {
         assertTrue(Lyrics.isAd("Anuncio", "Google", "", 0))
-        assertTrue(Lyrics.isAd("Algo", "", "Álbum", 200_000))
+        assertFalse(Lyrics.isAd("Algo", "", "Álbum", 200_000))
+        assertTrue(Lyrics.isAd("Algo", "", "Álbum", 20_000))
         assertTrue(Lyrics.isAd("Algo", "Marca", "", 20_000))
         assertFalse(Lyrics.isAd("Algo", "Marca", "Disco", 20_000))
         assertFalse(Lyrics.isAd("Bad Romance", "Lady Gaga", "", 290_000))

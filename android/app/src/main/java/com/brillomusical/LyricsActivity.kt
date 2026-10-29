@@ -23,7 +23,7 @@ import kotlin.math.abs
 class LyricsActivity : Activity() {
     private lateinit var bd: Backdrop
     private lateinit var stars: ConstellationView
-    private lateinit var panel: View
+    private lateinit var panel: ScrollView
     private lateinit var toast: TextView
     private var started = false
     private var posted = false
@@ -56,16 +56,6 @@ class LyricsActivity : Activity() {
         }
         panel = ScrollView(this).apply { // con scroll: en horizontal puede no caber
             isVerticalScrollBarEnabled = false
-            addView(card().apply {
-                isClickable = true // los toques del panel no llegan a la pantalla de detrás
-                fun row(name: String, options: List<String>, value: String, set: (String) -> Unit) {
-                    addView(text(name, Ui.Type.LABEL, Ui.TEXT3)); addView(segmented(options, value, set))
-                }
-                row("Fondo", Prefs.BACKDROPS, Prefs.backdrop) { Prefs.backdrop = it }
-                row("Transición", Prefs.TRANSITIONS, Prefs.transition) { Prefs.transition = it }
-                row("Carátula", Prefs.COVERS, Prefs.cover) { Prefs.cover = it }
-                addView(button("Ajustes", primary = false) { startActivity(Intent(this@LyricsActivity, SettingsActivity::class.java)) })
-            })
             visibility = View.GONE
         }
         val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -91,6 +81,21 @@ class LyricsActivity : Activity() {
             setOnTouchListener { _, e -> detector.onTouchEvent(e) }
         }
         setContentView(root)
+    }
+
+    /** Ajustes rápidos; se rehace en onStart para reflejar lo cambiado en Ajustes. */
+    private fun buildPanel() {
+        panel.removeAllViews()
+        panel.addView(card().apply {
+            isClickable = true // los toques del panel no llegan a la pantalla de detrás
+            fun row(name: String, options: List<String>, value: String, set: (String) -> Unit) {
+                addView(text(name, Ui.Type.LABEL, Ui.TEXT3)); addView(segmented(options, value, set))
+            }
+            row("Fondo", Prefs.BACKDROPS, Prefs.backdrop) { Prefs.backdrop = it }
+            row("Transición", Prefs.TRANSITIONS, Prefs.transition) { Prefs.transition = it }
+            row("Carátula", Prefs.COVERS, Prefs.cover) { Prefs.cover = it }
+            addView(button("Ajustes", primary = false) { startActivity(Intent(this@LyricsActivity, SettingsActivity::class.java)) })
+        })
     }
 
     private fun togglePanel() {
@@ -135,8 +140,10 @@ class LyricsActivity : Activity() {
         super.onStart()
         started = true
         immersive()
+        buildPanel()
+        NowPlaying.lyricsOpen = true
         NowPlaying.listen(onChange); Prefs.listen(onChange)
-        onChange()
+        NowPlaying.changed() // avisa al borde (y repinta esta pantalla)
     }
 
     override fun onStop() {
@@ -144,5 +151,6 @@ class LyricsActivity : Activity() {
         started = false; posted = false
         Choreographer.getInstance().removeFrameCallback(frame)
         NowPlaying.unlisten(onChange); Prefs.unlisten(onChange)
+        NowPlaying.lyricsOpen = false; NowPlaying.changed() // el borde vuelve a mirar si hay pantalla completa
     }
 }

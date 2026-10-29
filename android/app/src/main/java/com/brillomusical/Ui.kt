@@ -12,6 +12,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -133,6 +134,12 @@ fun Activity.screen(scroll: Boolean = true): LinearLayout {
     window.navigationBarColor = Ui.BG
     window.decorView.setBackgroundColor(Ui.BG)
     val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(24), dp(20), dp(32)) }
+    // targetSdk 35 dibuja bajo las barras: sus insets se suman a los márgenes
+    if (Build.VERSION.SDK_INT >= 30) col.setOnApplyWindowInsetsListener { v, ins ->
+        val i = ins.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        v.setPadding(dp(20) + i.left, dp(24) + i.top, dp(20) + i.right, dp(32) + i.bottom)
+        ins
+    }
     setContentView(if (scroll) ScrollView(this).apply { isFillViewport = true; addView(col) } else col)
     return col
 }
