@@ -10,8 +10,21 @@ android {
         applicationId = "com.brillomusical"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        // CI numera cada build para que Android acepte la actualización encima
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
+        versionName = "0.2.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+    }
+    // shortcut: clave en el repo (decisión del usuario), mover a GitHub Secrets si la app se publica
+    signingConfigs {
+        create("brillo") {
+            storeFile = file("brillo.keystore")
+            storePassword = "brillomusical"
+            keyAlias = "brillo"
+            keyPassword = "brillomusical"
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("brillo") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

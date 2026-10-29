@@ -12,7 +12,14 @@ object NowPlaying {
     var art: Bitmap? = null
     var color = Color.rgb(120, 160, 255)
     var playing = false
+    var palette: List<Int> = listOf(color)   // colores de la portada, el primero es el principal
+    var ad = false
     var lines: List<Lyrics.Line> = emptyList()
+    var lyricsState = LyricsState.NONE
+    enum class LyricsState { NONE, LOADING, FOUND, NOT_FOUND, OFFLINE }
+
+    /** Clave de la canción (desfase por canción, caché). */
+    val key get() = "$title|$artist"
 
     private var posMs = 0L
     private var stamp = 0L
@@ -24,6 +31,9 @@ object NowPlaying {
     }
 
     /** Posición extrapolada desde la última actualización de la sesión. */
+    /** Posición para la letra: extrapolada + desfase manual de la canción. */
+    fun lyricsPositionMs(): Long = positionMs() + Prefs.offset(key)
+
     fun positionMs(): Long =
         if (playing) posMs + ((SystemClock.elapsedRealtime() - stamp) * speed).toLong() else posMs
 
