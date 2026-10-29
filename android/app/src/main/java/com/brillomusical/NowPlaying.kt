@@ -27,13 +27,14 @@ object NowPlaying {
     private val listeners = mutableListOf<() -> Unit>()
 
     fun setPosition(pos: Long, updateTime: Long, playbackSpeed: Float) {
-        posMs = pos; stamp = updateTime; speed = playbackSpeed
+        // algunas sesiones no dan la hora de la actualización: se toma ahora
+        posMs = pos; stamp = if (updateTime > 0) updateTime else SystemClock.elapsedRealtime(); speed = playbackSpeed
     }
 
-    /** Posición extrapolada desde la última actualización de la sesión. */
     /** Posición para la letra: extrapolada + desfase manual de la canción. */
     fun lyricsPositionMs(): Long = positionMs() + Prefs.offset(key)
 
+    /** Posición extrapolada desde la última actualización de la sesión. */
     fun positionMs(): Long =
         if (playing) posMs + ((SystemClock.elapsedRealtime() - stamp) * speed).toLong() else posMs
 
