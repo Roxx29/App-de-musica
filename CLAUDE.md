@@ -4,7 +4,7 @@ App de escritorio para Windows que:
 1. Pone un brillo alrededor de la pantalla con el color de la portada de la canción que suena en YouTube Music (YouTube Premium).
 2. Muestra la letra sincronizada con efecto de constelación (palabras como estrellas unidas por líneas).
 
-Resultado final: una App ejecutable (.exe).
+Resultado final: una App ejecutable (.exe) y una app Android (.apk) en `android/` (build con `android/build.bat`).
 
 ## Instrucciones básicas (obligatorias)
 1. **No hablar cosas que no sean necesarias.** Respuestas cortas y al grano.
@@ -24,6 +24,7 @@ Resultado final: una App ejecutable (.exe).
 | Marketing | `.claude/agents/marketing.md` | Textos, experiencia del usuario nuevo, presentación y errores de cara al usuario |
 | Diseño avanzado | `.claude/agents/diseno-avanzado.md` | Lleva el aspecto visual a nivel profesional (composición, color, tipografía, coherencia) |
 | Animaciones | `.claude/agents/animaciones.md` | Transiciones, curvas, partículas y efectos; investiga referencias |
+| Android | `.claude/agents/android.md` | Versión de teléfono (Kotlin, carpeta `android/`): permisos, superposición, MediaSession, batería |
 
 ## Flujo de trabajo (para cada tarea o cambio)
 1. **Capitán** recibe la petición. Si algo no está claro, pregunta al usuario y espera.
