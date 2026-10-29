@@ -12,6 +12,7 @@ object NowPlaying {
     var art: Bitmap? = null
     var color = Color.rgb(120, 160, 255)
     var playing = false
+    var connected = false // el sistema tiene enlazado MusicListener
     var palette: List<Int> = listOf(color)   // colores de la portada, el primero es el principal
     var ad = false
     var lines: List<Lyrics.Line> = emptyList()

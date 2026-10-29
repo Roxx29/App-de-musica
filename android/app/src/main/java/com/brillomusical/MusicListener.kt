@@ -12,7 +12,7 @@ import android.service.notification.NotificationListenerService
 import java.io.File
 import java.util.concurrent.Executors
 
-/** Lee la sesión multimedia de YouTube Music y mantiene el brillo encendido. */
+/** Lee la sesión multimedia de la app de música que suene (YouTube Music si hay varias) y mantiene el brillo. */
 class MusicListener : NotificationListenerService() {
     private val main = Handler(Looper.getMainLooper())
     private val net = Executors.newSingleThreadExecutor() // un solo hilo de red: las búsquedas van en orden
@@ -26,25 +26,34 @@ class MusicListener : NotificationListenerService() {
 
     private val callback = object : MediaController.Callback() {
         override fun onMetadataChanged(m: MediaMetadata?) = update()
-        override fun onPlaybackStateChanged(s: PlaybackState?) = update()
-        override fun onSessionDestroyed() = attach(null)
+        override fun onPlaybackStateChanged(s: PlaybackState?) {
+            update()
+            // si esta app se pausa, quizá suena otra: se vuelve a elegir
+            if (s?.state != PlaybackState.STATE_PLAYING) attach(activeSessions())
+        }
+        override fun onSessionDestroyed() = attach(activeSessions())
     }
 
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { attach(it) }
 
     override fun onListenerConnected() {
         Prefs.init(this)
-        val msm = getSystemService(MediaSessionManager::class.java)
-        val me = ComponentName(this, MusicListener::class.java)
-        msm.addOnActiveSessionsChangedListener(sessions, me)
-        attach(msm.getActiveSessions(me))
+        NowPlaying.connected = true
+        getSystemService(MediaSessionManager::class.java)
+            .addOnActiveSessionsChangedListener(sessions, ComponentName(this, MusicListener::class.java))
+        attach(activeSessions())
         glow = GlowOverlay(this)
         update()
     }
 
+    private fun activeSessions(): List<MediaController>? = try {
+        getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, MusicListener::class.java))
+    } catch (e: SecurityException) { null } // permiso retirado
+
     override fun onListenerDisconnected() = cleanup()
 
     private fun cleanup() {
+        NowPlaying.connected = false
         getSystemService(MediaSessionManager::class.java).removeOnActiveSessionsChangedListener(sessions)
         controller?.unregisterCallback(callback); controller = null
         main.removeCallbacks(retry)
@@ -54,7 +63,9 @@ class MusicListener : NotificationListenerService() {
     override fun onDestroy() { cleanup(); net.shutdownNow(); super.onDestroy() }
 
     private fun attach(list: List<MediaController>?) {
-        val c = list?.firstOrNull { it.packageName == YT_MUSIC }
+        // la que suena primero (el sistema ordena por uso reciente); si ninguna suena, YouTube Music o la primera
+        val c = list?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: list?.firstOrNull { it.packageName == YT_MUSIC } ?: list?.firstOrNull()
         if (c?.sessionToken == controller?.sessionToken) return
         controller?.unregisterCallback(callback)
         controller = c
@@ -92,7 +103,9 @@ class MusicListener : NotificationListenerService() {
         if (key == artKey && art.width == NowPlaying.art?.width) return
         artKey = key
         NowPlaying.art = art
-        val small = Bitmap.createScaledBitmap(art, 24, 24, true)
+        // las portadas HARDWARE no dejan leer píxeles: se copian antes de escalar
+        val src = if (art.config == Bitmap.Config.HARDWARE) art.copy(Bitmap.Config.ARGB_8888, false) else art
+        val small = Bitmap.createScaledBitmap(src, 24, 24, true)
         val px = IntArray(24 * 24).also { small.getPixels(it, 0, 24, 0, 0, 24, 24) }
         NowPlaying.palette = palette(px)
         NowPlaying.color = NowPlaying.palette[0]

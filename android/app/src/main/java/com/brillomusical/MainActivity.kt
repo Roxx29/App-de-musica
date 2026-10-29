@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -40,7 +41,13 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(out: Bundle) { super.onSaveInstanceState(out); out.putInt("step", step) }
 
     // El estado de los permisos se comprueba al volver de Ajustes
-    override fun onResume() { super.onResume(); if (Prefs.onboarded) home() else onboarding(false) }
+    override fun onResume() {
+        super.onResume()
+        // tras instalar o actualizar, algunos teléfonos dejan el permiso activo pero sin enlazar el servicio
+        if (hasMusic && !NowPlaying.connected)
+            NotificationListenerService.requestRebind(ComponentName(this, MusicListener::class.java))
+        if (Prefs.onboarded) home() else onboarding(false)
+    }
     override fun onStart() { super.onStart(); NowPlaying.listen(onNow) }
     override fun onStop() { super.onStop(); NowPlaying.unlisten(onNow) }
 
@@ -177,8 +184,14 @@ class MainActivity : Activity() {
         val t = nowTitle ?: return
         val has = NowPlaying.title.isNotEmpty()
         t.text = if (has) NowPlaying.title else "Pon algo en YouTube Music"
-        artist?.text = NowPlaying.artist
-        artist?.visibility = if (has && NowPlaying.artist.isNotEmpty()) View.VISIBLE else View.GONE
+        // sin canción, explica el estado para saber si falta la conexión con el sistema
+        artist?.text = when {
+            has -> NowPlaying.artist
+            !hasMusic -> "Falta el permiso «Ver qué suena»."
+            !NowPlaying.connected -> "Conectando con Android… Si no cambia, apaga y enciende el permiso «Ver qué suena»."
+            else -> "Conectado. Esperando a que suene algo."
+        }
+        artist?.visibility = if (artist?.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         art?.setImageBitmap(if (has) NowPlaying.art else null)
     }
 }
