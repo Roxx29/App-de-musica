@@ -5,8 +5,8 @@ saltos y desfase no dan tirones. Los desplazamientos van en "em" (fracción del 
 """
 import math
 
-STYLES = ("constellation", "kinetic")
-STYLE_NAMES = {"constellation": "Constelación", "kinetic": "Latido"}
+STYLES = ("constellation", "kinetic", "ribbon")  # "ribbon" se dibuja con ribbon.py
+STYLE_NAMES = {"constellation": "Constelación", "kinetic": "Latido", "ribbon": "Cinta"}
 # dos efectos por ambiente; cada línea elige uno con su semilla
 EFFECTS = {"calm": ("rise", "sweep"), "normal": ("pop", "wave"), "intense": ("zoom", "fall")}
 LINE_IN = 0.25  # entrada de la línea

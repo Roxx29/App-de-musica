@@ -12,10 +12,10 @@ import zlib
 from collections import OrderedDict
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from . import backdrop, cover, effects, kinetic, layout, lyrics, media, quality, transitions, wheel
+from . import backdrop, cover, effects, kinetic, layout, lyrics, media, quality, ribbon, transitions, wheel
 from .color import FALLBACK
 
 # tamaños en fracción de la altura de la ventana: (estrella, texto)
@@ -73,6 +73,7 @@ class LyricsWindow(QWidget):
         if self.style not in kinetic.STYLES:
             self.style = "constellation"
         self.kin = {}  # Latido: (efecto, fuente) elegidos al aparecer cada línea
+        self.glyphs, self.rib, self.rib_track = {}, None, None  # Cinta: letras sueltas, texto y curva en caché
         self.beat_t = -1e9
         self.wheel = wheel.Wheel()
         self.wheel_on = self.skip = False
@@ -220,7 +221,7 @@ class LyricsWindow(QWidget):
         """El fondo Al ritmo y los automáticos necesitan el medidor aunque el borde esté apagado."""
         return (self.isVisible() and not self.isMinimized()
                 and (self.backdrop.setting in ("beat", "auto") or self.trans_setting == "auto"
-                     or self.style == "kinetic"))
+                     or self.style != "constellation"))
 
     def set_energy(self, e):
         self.backdrop.energy = e
@@ -403,6 +404,7 @@ class LyricsWindow(QWidget):
 
     def resizeEvent(self, e):
         self.bg = self.nebula = None
+        self.glyphs.clear()
         self.labels.clear()  # los tamaños de letra dependen de la altura
         self.stanza_cache.clear()  # y la esquina reservada para la tarjeta
         super().resizeEvent(e)
@@ -421,8 +423,15 @@ class LyricsWindow(QWidget):
                 f = QFont("Bahnschrift")  # Windows 10 1709+; si falta, la de siempre
                 if not f.exactMatch():
                     f = QFont(self.family)
+            elif kind == "condensed":  # Cinta: palo seco estrecho y grueso, como el del vídeo de referencia
+                f = QFont("Bahnschrift Condensed")
+                if "Bahnschrift" not in QFontInfo(f).family():
+                    f = QFont("Bahnschrift")
+                    f.setStretch(QFont.Condensed)
+                if "Bahnschrift" not in QFontInfo(f).family():
+                    f = QFont("Impact")  # en todos los Windows
             f.setPixelSize(max(8, key[0]))
-            f.setWeight({"light": QFont.Light, "heavy": QFont.Bold}.get(kind, QFont.DemiBold if bold else QFont.Normal))
+            f.setWeight({"light": QFont.Light, "heavy": QFont.Bold, "condensed": QFont.Bold}.get(kind, QFont.DemiBold if bold else QFont.Normal))
             self.fonts[key] = f
         return self.fonts[key]
 
@@ -492,6 +501,17 @@ class LyricsWindow(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)  # halo, nebulosa y etiquetas escaladas o en posición decimal
         self._paint(p, now)
+        w = self.width()
+        if now - self.toast_t < self.toast_secs and self.wheel.button == 0:  # aviso (con la rueda, su etiqueta) en una pastilla oscura (legible sobre portadas claras)
+            pm = self._text_pixmap(self.toast_text, 13, False, (255, 255, 255), False)
+            tw, th = pm.width() / pm.devicePixelRatio(), pm.height() / pm.devicePixelRatio()
+            pill = QRectF(w - tw - 16 - 12, 16 - 6, tw + 24, th + 12)
+            p.setOpacity(0.75 * min(1.0, 3 * (1 - (now - self.toast_t) / self.toast_secs)))
+            path = QPainterPath()
+            path.addRoundedRect(pill, 8, 8)
+            p.fillPath(path, QColor(0, 0, 0, 90 if self.style != "ribbon" else 200))
+            p.drawPixmap(QPointF(pill.x() + 12, pill.y() + 6), pm)
+            p.setOpacity(1.0)
         if self.wheel.open > 0:  # la letra se apaga un poco bajo la rueda abierta
             p.fillRect(self.rect(), QColor(0, 0, 0, round(110 * self.wheel.open)))
         self.wheel.draw(p, self.width(), self.rgb, self.wheel_value,
@@ -505,6 +525,8 @@ class LyricsWindow(QWidget):
     def _paint(self, p, now):
         w, h = self.width(), self.height()
         light = self.quality.light
+        if self.style == "ribbon":
+            return self._ribbon(p, now, w, h)
         if self.bg is None:
             self._build_bg()
         age = now - self.trans_t0  # tiempo desde el último cambio de estrofa
@@ -533,16 +555,6 @@ class LyricsWindow(QWidget):
             p.setOpacity(0.4)
             p.drawPixmap(QPointF(16, 10), self._text_pixmap(f"{snap['title']} · {snap['artist']}", 13, False,
                                                              (255, 255, 255), False))
-            p.setOpacity(1.0)
-        if now - self.toast_t < self.toast_secs and self.wheel.button == 0:  # aviso (con la rueda, su etiqueta) en una pastilla oscura (legible sobre portadas claras)
-            pm = self._text_pixmap(self.toast_text, 13, False, (255, 255, 255), False)
-            tw, th = pm.width() / pm.devicePixelRatio(), pm.height() / pm.devicePixelRatio()
-            pill = QRectF(w - tw - 16 - 12, 16 - 6, tw + 24, th + 12)
-            p.setOpacity(0.75 * min(1.0, 3 * (1 - (now - self.toast_t) / self.toast_secs)))
-            path = QPainterPath()
-            path.addRoundedRect(pill, 8, 8)
-            p.fillPath(path, QColor(0, 0, 0, 90))
-            p.drawPixmap(QPointF(pill.x() + 12, pill.y() + 6), pm)
             p.setOpacity(1.0)
         if not snap:
             return self._message(p, "Pon algo en YouTube Music ♪")
@@ -592,6 +604,159 @@ class LyricsWindow(QWidget):
         self._extras(p, P, age, old_pts, [(it["x"], it["y"]) for it in items])
         start = words[cur][1]
         self._draw(p, items, (pos - start, start))
+
+    def _glyph(self, ch, px, rgb):
+        """Una letra de la Cinta, sin sombra, en caché (se transforma una a una cada fotograma)."""
+        key = (ch, round(px), rgb, self.devicePixelRatioF())  # otra pantalla con otra escala: nítidas
+        pm = self.glyphs.get(key)
+        if pm is None:
+            if len(self.glyphs) > 400:
+                self.glyphs.clear()
+            font = self._font(px, True, "condensed")
+            fm = QFontMetricsF(font)
+            dpr = self.devicePixelRatioF()
+            pm = QPixmap(math.ceil((fm.horizontalAdvance(ch) + 4) * dpr), math.ceil((fm.height() + 4) * dpr))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            q = QPainter(pm)
+            q.setRenderHint(QPainter.TextAntialiasing)
+            q.setFont(font)
+            q.setPen(QColor(*rgb))
+            q.drawText(QPointF(2, 2 + fm.ascent()), ch)
+            q.end()
+            self.glyphs[key] = pm
+        return pm
+
+    def _ribbon_text(self, px, fm, title):
+        """(tiempos, letras por palabra, anchos, desplazamientos, paso) del texto de la Cinta; una vez por canción y tamaño."""
+        snap = self.snap
+        key = (round(px), title)
+        if self.rib and self.rib[0] == key and self.rib[2] is self.lines:
+            return self.rib[1]
+        words = [(t, x.upper()) for i, (_, text) in enumerate(self.lines)
+                 for t, x in zip(lyrics.word_times(self.lines, i), lyrics.words(text))]
+        step = ribbon.WORD_STEP
+        if not words:  # sin letra: el título repetido, avanzando sin parar (como en el vídeo)
+            words = [(k * 2.5, title) for k in range(int((snap["duration"] or 600) / 2.5) + 3)]
+            step = None
+        elif words[0][0] > 0:
+            words.insert(0, (0.0, title))  # antes de la primera línea pasa el título
+        space = (0.12 if step else 0.05) * px  # casi pegadas, como en el vídeo
+        times, lets, widths, offs, m = [], [], [], [], 0.0
+        for t, x in words:
+            adv = [fm.horizontalAdvance(x[:j]) for j in range(len(x) + 1)]
+            times.append(t)
+            lets.append([(ch, adv[j], adv[j + 1] - adv[j]) for j, ch in enumerate(x)])
+            widths.append(adv[-1])
+            offs.append(m)
+            m += adv[-1] + space
+        self.rib = (key, (times, lets, widths, offs, step), self.lines)
+        return self.rib[1]
+
+    def _ribbon(self, p, now, w, h):
+        """Cinta: papel claro, la letra recorriendo una cinta en S que se retuerce, y el rótulo del título al empezar."""
+        p.fillRect(self.rect(), QColor(*ribbon.PAPER))
+        snap = self.snap
+        if not snap:
+            return self._message(p, "Pon algo en YouTube Music ♪", rgb=ribbon.INK)
+        if snap["ad"]:
+            return self._message(p, "Anuncio · la música vuelve enseguida", rgb=ribbon.INK)
+        pos, light = self.position(), self.quality.light
+        px = (0.18 if light else 0.16) * h  # Ligera: letra más grande, menos letras que mover
+        font = self._font(px, True, "condensed")
+        fm = QFontMetricsF(font)
+        title = snap["title"].upper()
+        times, lets, widths, offs, step = self._ribbon_text(px, fm, title)
+        if not self.rib_track or self.rib_track[0] != (w, h):
+            self.rib_track = ((w, h), ribbon.track(w, h))
+        tr = self.rib_track[1]
+        length = tr[0][-1]
+        anchor = ribbon.ANCHOR * length
+        m_now = ribbon.scroll(pos, times, offs, widths, step)
+        cur = bisect.bisect_right(times, pos) - 1
+        acc = QColor(*self.rgb)  # acento: la portada oscurecida hasta que se lea sobre el papel
+        acc.setHslF(acc.hslHueF(), max(0.5, acc.hslSaturationF()), min(0.42, acc.lightnessF()))
+        accent = (acc.red(), acc.green(), acc.blue())
+        beat = 0.0 if light else effects.env(now - self.beat_t, 0.04, 0.22)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, not light)
+        # la cinta aparece cuando se va el rótulo (si se entra a mitad de canción, ya está)
+        fade = min(1.0, max(0.0, (pos - ribbon.CARD_END) / 0.4)) if pos < ribbon.CARD_END + 0.4 else 1.0
+        p.setOpacity(fade)
+        lo, hi = m_now - anchor, (m_now + length - anchor) if fade > 0 else -1e18  # bajo el rótulo, nada
+        for i in range(max(0, bisect.bisect_right(offs, lo) - 1), len(offs)):
+            if offs[i] > hi:
+                break
+            for ch, dx, adv in lets[i]:
+                a = ribbon.at(tr, anchor + offs[i] + dx + adv / 2 - m_now)
+                if a is None or ch == " ":
+                    continue
+                x, y, ang, u = a
+                c = math.cos(ribbon.twist(u, 0.0 if light else now, beat))
+                if abs(c) < 0.08 or (c < 0 and light):  # de canto no se ve; en Ligera, sin reverso
+                    continue
+                pm = self._glyph(ch, px, (accent if i == cur else ribbon.INK) if c > 0 else ribbon.BACK)
+                dpr = pm.devicePixelRatio()
+                p.save()
+                p.translate(x, y)
+                p.shear(0, max(-1.2, min(1.2, math.tan(ang))))  # se inclina con la curva, trazos verticales
+                p.scale(1, c)  # media vuelta: escala negativa = reverso en espejo
+                p.drawPixmap(QPointF(-pm.width() / dpr / 2, -pm.height() / dpr / 2), pm)
+                p.restore()
+        p.setOpacity(1.0)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        if not self.lines and self.status:
+            self._message(p, self.status, y=0.93, alpha=0.5, size=0.022 * h, rgb=ribbon.INK)
+        self._ribbon_card(p, pos, w, h, title, snap["artist"])
+
+    def _ribbon_card(self, p, pos, w, h, title, artist):
+        """Rótulo al empezar la canción: flechas que cruzan arriba, barra y título letra a letra."""
+        c = ribbon.card(pos)
+        if c is None:
+            return
+        arrows, bar, frac, out = c
+        ink = QColor(*ribbon.INK)
+        # franja de chevrones ››› arriba, entrando por la izquierda y saliendo por la derecha
+        bh = 0.28 * h
+        gap, thick = 0.9 * bh, 0.45 * bh
+        chev = QPainterPath()
+        chev.addPolygon([QPointF(0, 0), QPointF(thick, 0), QPointF(thick + bh / 2, bh / 2), QPointF(thick, bh),
+                         QPointF(0, bh), QPointF(bh / 2, bh / 2)])
+        shift = -w * (1 - arrows) + w * 1.1 * out + (pos / 0.4 * gap) % gap
+        x = shift - gap
+        while x < w:
+            p.fillPath(chev.translated(x, -0.04 * h), ink)
+            x += gap
+        # título: barra vertical y como mucho 2 filas que se escriben letra a letra
+        px = 0.10 * h
+        font = self._font(px, True, "condensed")
+        fm = QFontMetricsF(font)
+        words = title.split()
+        if not words:
+            return
+        rows = [" ".join(words[i] for i in r)
+                for r in kinetic.wrap([fm.horizontalAdvance(x) for x in words], fm.horizontalAdvance(" "), 0.8 * w)][:2]
+        lh = px * 1.0
+        x0, top = 0.06 * w, 0.62 * h - len(rows) * lh
+        p.fillRect(QRectF(x0, top, max(2.0, 0.004 * h), bar * (len(rows) * lh + 0.05 * h)), ink)
+        shown = frac * sum(len(r) for r in rows)
+        p.setFont(font)
+        p.setPen(ink)
+        tx = x0 + 0.012 * w
+        for r, row in enumerate(rows):
+            n = max(0.0, min(len(row), shown))
+            shown -= len(row)
+            vis = fm.horizontalAdvance(row[:math.ceil(n)]) * (1 - out)  # salida: se borra de derecha a izquierda
+            if vis <= 0:
+                continue
+            p.save()
+            p.setClipRect(QRectF(tx, top + r * lh - 0.2 * px, vis, lh + 0.4 * px))
+            p.drawText(QPointF(tx, top + r * lh + fm.ascent() * 0.85), row)
+            p.restore()
+        if artist:
+            p.setOpacity(0.6 * bar * (1 - out))
+            p.setFont(self._font(0.03 * h, False))
+            p.drawText(QPointF(tx, top + len(rows) * lh + 0.045 * h), artist)
+            p.setOpacity(1.0)
 
     def _kinetic(self, p, pos, now, w, h, gap, hero):
         """Latido: la línea que suena, grande y centrada; la anterior arriba y la siguiente abajo, tenues."""

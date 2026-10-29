@@ -28,6 +28,7 @@ Resultado final: una App ejecutable (.exe).
 | Gestor de ideas | `.claude/agents/gestor-ideas.md` | Coordina Ideas e Investigación y presenta las mejores ideas |
 | Ideas | `.claude/agents/ideas.md` | Propone funciones y efectos nuevos y llamativos |
 | Investigación | `.claude/agents/investigacion.md` | Referencias, tecnologías y viabilidad, con fuentes |
+| Análisis de vídeo | `.claude/agents/video.md` | Analiza vídeos de referencia y describe diseño y animación para replicarlos |
 | Ayudante | `.claude/agents/ayudante.md` | Subagente para tareas pequeñas y cortas que le encargan los demás |
 
 ## Flujo de trabajo (para cada tarea o cambio)

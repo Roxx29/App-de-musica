@@ -2,7 +2,7 @@
 
 **Tu música, en la luz de tu pantalla.**
 
-BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de lo que suena en YouTube Music y muestra la letra sincronizada de dos formas. En **Constelación**, cada palabra es una estrella que se une a la anterior mientras se canta. En **Latido**, la letra aparece grande y se mueve al ritmo de la canción.
+BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de lo que suena en YouTube Music y muestra la letra sincronizada de tres formas. En **Constelación**, cada palabra es una estrella que se une a la anterior mientras se canta. En **Latido**, la letra aparece grande y se mueve al ritmo de la canción. En **Cinta**, la palabra que suena recorre una cinta que se retuerce en 3D, sobre papel claro.
 
 ## Empieza en 30 segundos
 
@@ -13,8 +13,9 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 ## Qué hace
 
 - **Brillo en los bordes**: un halo con los colores de la portada que sigue el ritmo. Puedes elegir entre Estático, Respirar, Al ritmo, Giratorio, Aurora, Destello, Fuego, Ondas y Arcoíris. También puedes dejarlo en **Automático** para que cambie según el ambiente de la canción.
-- **Dos estilos de letra**:
+- **Tres estilos de letra**:
   - **Constelación**: cada estrofa forma una constelación nueva y pasa a la siguiente con una transición (Viaje, Remolino, Explosión, Lluvia de estrellas, Polvo, Reconstelar u Onda). La transición puede ser fija, Aleatoria o Automática.
+  - **Cinta**: fondo blanco hueso y letra negra condensada que avanza por una cinta en S. La cinta se retuerce en perspectiva y al final se ve su reverso en espejo; la palabra que suena toma el color de la portada. Al empezar cada canción aparece un rótulo con el título escrito letra a letra bajo una franja de flechas. Si no hay letra, la cinta repite el título.
   - **Latido**: la línea que suena se ve grande y en el centro, con efectos de tipografía cinética que dependen del ambiente. En las canciones tranquilas la letra sube suave o se rellena tipo karaoke. En las normales, las palabras golpean o se mecen. En las intensas, la letra cae en cascada o entra con impacto, en mayúsculas.
 - **Portada de fondo**: difuminada, en movimiento, con efecto Ken Burns o al ritmo. La portada HD sale de iTunes y Deezer.
 - **Carátula**: una tarjeta con título, artista y progreso. Si la canción no tiene letra, o llega un instrumental largo, la carátula se mueve al centro en grande.
@@ -34,7 +35,7 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 | **M** | Abrir o cerrar el menú de rueda |
 | **F** / **F11** / doble clic | Pantalla completa |
 | **Esc** | Cerrar la rueda o salir de pantalla completa |
-| **L** | Cambiar el estilo de letra (Constelación / Latido) |
+| **L** | Cambiar el estilo de letra (Constelación / Latido / Cinta) |
 | **B** | Cambiar el fondo |
 | **C** | Cambiar la posición de la carátula |
 | **T** | Cambiar la transición |

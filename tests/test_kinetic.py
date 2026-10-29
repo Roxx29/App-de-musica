@@ -33,7 +33,8 @@ class TestKinetic(unittest.TestCase):
         self.assertIn(kinetic.pick(7, "calm"), kinetic.EFFECTS["calm"])
         self.assertIn(kinetic.pick(7, "raro"), kinetic.EFFECTS["normal"])
         self.assertEqual(kinetic.next_style("constellation"), "kinetic")
-        self.assertEqual(kinetic.next_style("kinetic"), "constellation")
+        self.assertEqual(kinetic.next_style("kinetic"), "ribbon")
+        self.assertEqual(kinetic.next_style("ribbon"), "constellation")
 
 
 if __name__ == "__main__":
