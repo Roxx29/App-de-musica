@@ -24,6 +24,11 @@ Resultado final: una App ejecutable (.exe).
 | Marketing | `.claude/agents/marketing.md` | Textos, experiencia del usuario nuevo, presentación y errores de cara al usuario |
 | Diseño avanzado | `.claude/agents/diseno-avanzado.md` | Lleva el aspecto visual a nivel profesional (composición, color, tipografía, coherencia) |
 | Animaciones | `.claude/agents/animaciones.md` | Transiciones, curvas, partículas y efectos; investiga referencias |
+| Optimización | `.claude/agents/optimizacion.md` | Rendimiento, equipos de pocas capacidades, tecnologías nuevas |
+| Gestor de ideas | `.claude/agents/gestor-ideas.md` | Coordina Ideas e Investigación y presenta las mejores ideas |
+| Ideas | `.claude/agents/ideas.md` | Propone funciones y efectos nuevos y llamativos |
+| Investigación | `.claude/agents/investigacion.md` | Referencias, tecnologías y viabilidad, con fuentes |
+| Ayudante | `.claude/agents/ayudante.md` | Subagente para tareas pequeñas y cortas que le encargan los demás |
 
 ## Flujo de trabajo (para cada tarea o cambio)
 1. **Capitán** recibe la petición. Si algo no está claro, pregunta al usuario y espera.
@@ -32,5 +37,7 @@ Resultado final: una App ejecutable (.exe).
 4. **Decisión:** el Capitán elige el plan final y lo resume en pocas líneas.
 5. **Ejecución:** Programación implementa; Diseño y Lógica revisan; Pruebas valida; Empaquetado actualiza el build si hace falta.
 6. **Entrega:** el Capitán informa al usuario de forma breve qué se hizo y qué debe ejecutar.
+
+Ideas e Investigación participan a través del Gestor de ideas. El Ayudante no opina: solo ejecuta tareas cortas.
 
 Registrar cada decisión en `docs/decisiones.md` (fecha, petición, plan elegido, motivo).

@@ -13,7 +13,7 @@ from PySide6.QtCore import QLockFile, QObject, QSettings, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import artwork, audio, backdrop, beat, color, cover, lyrics, transitions
+from . import artwork, audio, backdrop, beat, color, cover, kinetic, lyrics, quality, transitions
 from .color import FALLBACK
 from .constellation import HELP, SEARCHING, LyricsWindow
 from .glow import Glow
@@ -51,9 +51,10 @@ class Controller(QObject):
         self.settings = QSettings("BrilloMusical", "BrilloMusical")
         self.frames = FrameClock()  # fotogramas al ritmo de la pantalla para el borde y la letra
         app.aboutToQuit.connect(self.frames.stop)
-        self.glow = Glow(self.frames)
+        self.quality = quality.Governor(self.settings.value("quality", "auto"))  # común a borde y letra
+        self.glow = Glow(self.frames, self.quality)
         self.glow.set_enabled(self.settings.value("glow_enabled", True, type=bool))
-        self.window = LyricsWindow(self.settings, self.frames)
+        self.window = LyricsWindow(self.settings, self.frames, self.quality)
         self.window.offset_step.connect(self._shift_offset)
         self.track = None  # clave de la canción actual
         self.track_snap = None
@@ -98,6 +99,7 @@ class Controller(QObject):
         f = show.font()
         f.setBold(True)
         show.setFont(f)
+        menu.addAction("Pantalla completa", self._fullscreen)
         menu.addSeparator()
         toggle = QAction("Brillo en los bordes", menu, checkable=True, checked=self.glow.enabled)
         toggle.toggled.connect(self._toggle_glow)
@@ -115,6 +117,9 @@ class Controller(QObject):
         pulse.toggled.connect(self._toggle_pulse)
         menu.addAction(pulse)
         menu.addSeparator()
+        style = self._choice(menu, "Estilo de letra", kinetic.STYLES, kinetic.STYLE_NAMES, self.window.style,
+                             lambda k: self.window.set_style(k, show=True) or self._update_audio(self.window.snap))
+        self.window.style_changed.connect(lambda k: style[k].setChecked(True) or self._update_audio(self.window.snap))
         trans = menu.addMenu("Transición entre estrofas")
         trans_group = QActionGroup(trans)
         self.trans_actions = {}
@@ -159,6 +164,9 @@ class Controller(QObject):
         offset.addAction(f"Adelantar letra (+{step} s)", lambda: self._shift_offset(OFFSET_STEP))
         offset.addAction(f"Retrasar letra (−{step} s)", lambda: self._shift_offset(-OFFSET_STEP))
         offset.addAction("Restablecer sincronía", lambda: self._shift_offset(None))
+        qual = self._choice(menu, "Calidad", quality.SETTINGS, quality.NAMES, self.quality.setting,
+                            lambda k: self.window.set_quality(k, show=True))
+        self.window.quality_changed.connect(lambda k: qual[k].setChecked(True))
         menu.addSeparator()
         menu.addAction("Atajos de teclado", lambda: self.tray.showMessage("Atajos en la ventana de la letra", HELP))
         menu.addAction("Salir de BrilloMusical", self._quit)
@@ -168,6 +176,24 @@ class Controller(QObject):
         self.tray.activated.connect(lambda r: r == QSystemTrayIcon.DoubleClick and self._open())
         self.tray.show()
         self.menu = menu  # que no lo recoja el recolector
+
+    @staticmethod
+    def _choice(menu, title, keys, names, current, pick):
+        """Submenú de opciones exclusivas; devuelve {clave: acción} para marcarlas desde fuera."""
+        sub = menu.addMenu(title)
+        group, acts = QActionGroup(sub), {}
+        for key in keys:
+            act = QAction(names[key], sub, checkable=True, checked=key == current)
+            act.triggered.connect(lambda _=False, k=key: pick(k))
+            group.addAction(act)
+            sub.addAction(act)
+            acts[key] = act
+        return acts
+
+    def _fullscreen(self):
+        self._open()
+        if not self.window.isFullScreen():
+            self.window.toggle_fullscreen()
 
     def _toggle_glow(self, on):
         self.settings.setValue("glow_enabled", on)
@@ -338,7 +364,8 @@ class Controller(QObject):
             self.last_line = idx
 
     def _open(self):
-        self.window.showNormal()
+        if not self.window.isFullScreen():  # en pantalla completa se queda así
+            self.window.showNormal()
         self.window.raise_()
         self.window.activateWindow()
 

@@ -11,6 +11,7 @@ import colorsys
 import ctypes
 import logging
 import math
+import os
 import time
 from ctypes import wintypes
 
@@ -42,11 +43,17 @@ user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
 user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND] + [ctypes.c_int] * 4 + [wintypes.UINT]
+user32.GetForegroundWindow.restype = wintypes.HWND  # 64 bits: sin esto el handle se trunca
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 
 
 def fullscreen_app():
     state = ctypes.c_int(0)
-    return ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) == 0 and state.value in GAMES
+    if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) != 0 or state.value not in GAMES:
+        return False
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value != os.getpid()  # nuestra letra a pantalla completa no apaga el borde
 
 
 def _ease(t):  # easeInOutCubic
@@ -130,8 +137,9 @@ class Strip(QWidget):
 
 
 class Glow:
-    def __init__(self, frames):
+    def __init__(self, frames, governor):
         self.frames = frames
+        self.quality = governor  # Ligera: borde a 30 fps
         self.enabled = True
         self._scr = None
         self.screen = QRect()
@@ -261,7 +269,7 @@ class Glow:
     def _on_tick(self):
         if not self.ticking:
             return
-        self.skip = self.half and not self.skip  # modo lento: uno de cada dos
+        self.skip = (self.half or self.quality.light) and not self.skip  # modo lento: uno de cada dos
         if not self.skip:
             self._tick()
 

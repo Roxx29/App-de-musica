@@ -15,7 +15,7 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from . import backdrop, cover, layout, lyrics, media, transitions
+from . import backdrop, cover, effects, kinetic, layout, lyrics, media, quality, transitions, wheel
 from .color import FALLBACK
 
 # tamaños en fracción de la altura de la ventana: (estrella, texto)
@@ -26,7 +26,10 @@ FLASH, SPARKS = 0.3, 0.5
 BG_STARS, TWINKLERS = 120, 20
 TOAST = 1.5  # avisos breves (desfase, modo de fondo)
 SEARCHING = "Buscando letra…"
-HELP = "B fondo · C carátula · T transición · ←/→ sincronizar · H atajos"
+HELP = "M menú · F pantalla completa · L estilo · B fondo · C carátula · T transición · ←/→ sincronizar · H atajos"
+FIRST_TIP = "Acerca el ratón arriba al centro para ver el menú · H atajos"
+CURSOR_HIDE = 2500  # ms quieto en pantalla completa antes de ocultar el cursor
+KIN_SIZE, KIN_Y, KIN_W = 0.075, 0.46, 0.82  # Latido: letra (·alto), centro vertical y anchura máxima (·ancho)
 
 
 def _out_cubic(t):
@@ -58,11 +61,23 @@ class LyricsWindow(QWidget):
     bg_changed = Signal(str)  # B: siguiente modo de fondo
     cover_changed = Signal(str)  # C: siguiente posición de la carátula
     transition_changed = Signal(str)  # T: siguiente transición
+    style_changed = Signal(str)  # L: Constelación / Latido
+    quality_changed = Signal(str)
 
-    def __init__(self, settings, frames):
+    def __init__(self, settings, frames, governor):
         super().__init__()
         self.settings = settings
         self.frames = frames
+        self.quality = governor
+        self.style = settings.value("lyrics_style", "constellation")
+        if self.style not in kinetic.STYLES:
+            self.style = "constellation"
+        self.kin = {}  # Latido: (efecto, fuente) elegidos al aparecer cada línea
+        self.beat_t = -1e9
+        self.wheel = wheel.Wheel()
+        self.wheel_on = self.skip = False
+        self.setMouseTracking(True)
+        self.cursor_timer = QTimer(self, singleShot=True, interval=CURSOR_HIDE, timeout=self._hide_cursor)
         self.clock = lyrics.Clock()
         self.offset = 0.0
         self.toast_text, self.toast_t, self.toast_secs = "", -1e9, TOAST
@@ -129,6 +144,7 @@ class LyricsWindow(QWidget):
         self.chorus = layout.chorus(lines, self.groups)  # estribillos: transición de impacto en Automática
         self.gaps = layout.gaps(lines)  # instrumentales largos: carátula grande
         self.stanza_cache.clear()
+        self.kin.clear()
         # la última estrofa de la canción anterior termina de irse (no desaparece de golpe)
         self.old_items = [dict(it) for it in self.last_items] if self.last_items else self.leaving_now
         self.shown, self.last_items, self.trans_t0 = None, [], time.monotonic()
@@ -203,13 +219,42 @@ class LyricsWindow(QWidget):
     def wants_audio(self):
         """El fondo Al ritmo y los automáticos necesitan el medidor aunque el borde esté apagado."""
         return (self.isVisible() and not self.isMinimized()
-                and (self.backdrop.setting in ("beat", "auto") or self.trans_setting == "auto"))
+                and (self.backdrop.setting in ("beat", "auto") or self.trans_setting == "auto"
+                     or self.style == "kinetic"))
 
     def set_energy(self, e):
         self.backdrop.energy = e
 
     def beat(self):
         self.backdrop.beat()
+        self.beat_t = time.monotonic()
+
+    def set_style(self, style, show=False):
+        if style in kinetic.STYLES:
+            self.style = style
+            self.settings.setValue("lyrics_style", style)
+            # al volver a Constelación no hay transición desde una estrofa vieja
+            self.shown, self.last_items, self.old_items, self.leaving_now = None, [], [], []
+            if show:
+                self.toast(f"Estilo: {kinetic.STYLE_NAMES[style]}")
+            self.update()
+
+    def set_quality(self, setting, show=False):
+        if setting in quality.SETTINGS:
+            self.quality.setting = setting
+            self.settings.setValue("quality", setting)
+            if show:
+                self.toast(f"Calidad: {quality.NAMES[setting]}")
+
+    def toggle_fullscreen(self):
+        if not self.isFullScreen():
+            self.normal_geo = self.saveGeometry()  # la que se guarda al cerrar: no arranca a pantalla completa
+        self.setWindowState(self.windowState() ^ Qt.WindowFullScreen)  # vuelve a normal o maximizada
+        if self.isFullScreen():
+            self.toast("Esc o F11 para salir de pantalla completa", 2.5)
+            self.cursor_timer.start()
+        else:
+            self.unsetCursor()
 
     def position(self):
         """Posición de la canción para la letra: reloj suavizado + desfase manual."""
@@ -230,25 +275,98 @@ class LyricsWindow(QWidget):
             self.frames.want("lyrics", run)
 
     def _on_tick(self):
-        if self.animating:
-            self.update()
+        if self.animating or self.wheel_on:
+            self.skip = self.quality.light and not self.skip  # Ligera: uno de cada dos (30 fps)
+            if not self.skip:
+                self.update()
+
+    def _wheel_frames(self):
+        on = self.wheel.busy(time.monotonic())
+        if on != self.wheel_on:
+            self.wheel_on = on
+            self.frames.want("wheel", on)
+
+    def cycle(self, action):
+        """Siguiente opción de una acción (teclas y rueda); avisa a la bandeja para marcarla."""
+        if action == "bg":
+            self.set_bg(backdrop.next_mode(self.backdrop.setting), show=True)
+            self.bg_changed.emit(self.backdrop.setting)
+        elif action == "transition":
+            self.set_transition(transitions.next_setting(self.trans_setting), show=True)
+            self.transition_changed.emit(self.trans_setting)
+        elif action == "cover":
+            self.set_cover(cover.next_mode(self.cover.mode), show=True)
+            self.cover_changed.emit(self.cover.mode)
+        elif action == "style":
+            self.set_style(kinetic.next_style(self.style), show=True)
+            self.style_changed.emit(self.style)
+        elif action == "quality":
+            self.set_quality(quality.next_setting(self.quality.setting), show=True)
+            self.quality_changed.emit(self.quality.setting)
+        elif action == "fullscreen":
+            self.toggle_fullscreen()
+
+    def wheel_value(self, action):
+        return {"style": kinetic.STYLE_NAMES[self.style], "transition": transitions.SETTING_NAMES[self.trans_setting],
+                "bg": backdrop.NAMES[self.backdrop.setting], "cover": cover.NAMES[self.cover.mode],
+                "quality": quality.NAMES[self.quality.setting],
+                "fullscreen": "salir" if self.isFullScreen() else "activar"}[action]
+
+    KEYS = {Qt.Key_B: "bg", Qt.Key_T: "transition", Qt.Key_C: "cover", Qt.Key_L: "style",
+            Qt.Key_F: "fullscreen", Qt.Key_F11: "fullscreen"}
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Left, Qt.Key_Right):
             self.offset_step.emit(0.1 if e.key() == Qt.Key_Right else -0.1)
-        elif e.key() == Qt.Key_B:
-            self.set_bg(backdrop.next_mode(self.backdrop.setting), show=True)
-            self.bg_changed.emit(self.backdrop.setting)
-        elif e.key() == Qt.Key_T:
-            self.set_transition(transitions.next_setting(self.trans_setting), show=True)
-            self.transition_changed.emit(self.trans_setting)
+        elif e.key() in self.KEYS:
+            self.cycle(self.KEYS[e.key()])
         elif e.key() == Qt.Key_H:
             self.toast(HELP, 6)
-        elif e.key() == Qt.Key_C:
-            self.set_cover(cover.next_mode(self.cover.mode), show=True)
-            self.cover_changed.emit(self.cover.mode)
+        elif e.key() == Qt.Key_M:
+            self.wheel.toggle()  # abierta con tecla: no se cierra sola hasta que el ratón pase y se vaya
+            self._wheel_frames()
+            self.update()
+        elif e.key() == Qt.Key_Escape:
+            if self.wheel.target:
+                self.wheel.toggle(False)
+                self._wheel_frames()
+            elif self.isFullScreen():
+                self.toggle_fullscreen()
         else:
             super().keyPressEvent(e)
+
+    # --- ratón: rueda, doble clic y cursor en pantalla completa ---
+    def mouseMoveEvent(self, e):
+        before = (self.wheel.near, self.wheel.hover)
+        self.wheel.move(e.position().x(), e.position().y(), self.width(), time.monotonic())
+        self._wheel_frames()
+        if self.isFullScreen():
+            self.unsetCursor()
+            self.cursor_timer.start()
+        if (self.wheel.near, self.wheel.hover) != before and not self.animating:  # sonando ya repinta el reloj
+            self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            action = self.wheel.press(e.position().x(), e.position().y(), self.width())
+            if action and action != "toggle":
+                self.cycle(action)
+            self._wheel_frames()
+            self.update()
+        super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton and not self.wheel.hit(e.position().x(), e.position().y(), self.width()):
+            self.toggle_fullscreen()
+
+    def leaveEvent(self, e):
+        self.wheel.move(-1e4, -1e4, self.width(), time.monotonic())
+        self._wheel_frames()
+        super().leaveEvent(e)
+
+    def _hide_cursor(self):
+        if self.isFullScreen() and not self.wheel.target:
+            self.setCursor(Qt.BlankCursor)
 
     # --- ventana ---
     def showEvent(self, e):
@@ -262,16 +380,26 @@ class LyricsWindow(QWidget):
         self._update_timer()
         if not self.settings.value("help_shown", False, type=bool):  # la primera vez: los atajos
             self.settings.setValue("help_shown", True)
-            self.toast(HELP, 6)
+            self.toast(FIRST_TIP, 6)  # corto: el de atajos taparía el botón de la rueda
+            self.wheel.hint_until = time.monotonic() + 4  # que se vea dónde está el menú
+            self._wheel_frames()
 
     def hideEvent(self, e):
         super().hideEvent(e)
         self._update_timer()
+        self.wheel.reset()  # oculta no se pinta: una animación a medias pediría fotogramas para siempre
+        self._wheel_frames()
 
     def changeEvent(self, e):
         super().changeEvent(e)
         if e.type() == QEvent.WindowStateChange:  # minimizar / restaurar
             self._update_timer()
+            if self.isMinimized():
+                self.wheel.reset()
+                self._wheel_frames()
+            if not self.isFullScreen():  # salió por la bandeja, Win+↓…: el cursor vuelve
+                self.cursor_timer.stop()
+                self.unsetCursor()
 
     def resizeEvent(self, e):
         self.bg = self.nebula = None
@@ -280,16 +408,21 @@ class LyricsWindow(QWidget):
         super().resizeEvent(e)
 
     def closeEvent(self, e):
-        self.settings.setValue("lyrics_geometry", self.saveGeometry())
+        self.settings.setValue("lyrics_geometry", self.normal_geo if self.isFullScreen() else self.saveGeometry())
         super().closeEvent(e)
 
     # --- cachés ---
-    def _font(self, px, bold=False):
-        key = (round(px), bold)
+    def _font(self, px, bold=False, kind=""):
+        """kind: "" normal, "light" fina, "heavy" Bahnschrift gruesa (Latido intenso)."""
+        key = (round(px), bold, kind)
         if key not in self.fonts:
             f = QFont(self.family)
+            if kind == "heavy":
+                f = QFont("Bahnschrift")  # Windows 10 1709+; si falta, la de siempre
+                if not f.exactMatch():
+                    f = QFont(self.family)
             f.setPixelSize(max(8, key[0]))
-            f.setWeight(QFont.DemiBold if bold else QFont.Normal)
+            f.setWeight({"light": QFont.Light, "heavy": QFont.Bold}.get(kind, QFont.DemiBold if bold else QFont.Normal))
             self.fonts[key] = f
         return self.fonts[key]
 
@@ -352,16 +485,30 @@ class LyricsWindow(QWidget):
 
     # --- dibujo ---
     def paintEvent(self, e):
+        t0 = time.perf_counter()
         now = time.monotonic()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)  # halo, nebulosa y etiquetas escaladas o en posición decimal
+        self._paint(p, now)
+        if self.wheel.open > 0:  # la letra se apaga un poco bajo la rueda abierta
+            p.fillRect(self.rect(), QColor(0, 0, 0, round(110 * self.wheel.open)))
+        self.wheel.draw(p, self.width(), self.rgb, self.wheel_value,
+                        lambda t: self._text_pixmap(t, 13, True, (255, 255, 255), False), now)
+        p.end()
+        self._wheel_frames()
+        if self.animating and self.quality.feed((time.perf_counter() - t0) * 1000, now):
+            self.toast("Calidad ligera para ir más fluido", 3)
+            self.quality_changed.emit(self.quality.setting)
+
+    def _paint(self, p, now):
         w, h = self.width(), self.height()
+        light = self.quality.light
         if self.bg is None:
             self._build_bg()
         age = now - self.trans_t0  # tiempo desde el último cambio de estrofa
-        push = transitions.push(self.trans_P, age) if self.trans_P else 0.0
+        push = transitions.push(self.trans_P, age) if self.trans_P and not light else 0.0  # Ligera: sin ampliar el fondo
         self.backdrop.draw(p, w, h, push=push, live=self.animating)
         snap = self.snap
         pos = self.position() if snap else 0.0
@@ -374,7 +521,8 @@ class LyricsWindow(QWidget):
         self.cover.set_hero(no_lyrics or gap, 1.0 if no_lyrics else 0.7)
         if self.cover.mode == "center":  # se apaga a la vez que llega la carátula grande (sin parpadeo)
             self.cover.draw_watermark(p, w, h, push, self.devicePixelRatioF(), 1 - self.cover.hero_progress())
-        self._background(p, now, w, h)
+        if not light:  # Ligera: sin estrellas que titilan ni nebulosa
+            self._background(p, now, w, h)
         prog = cover.progress(pos - self.offset, snap["duration"]) if snap else None
         native = 1000 if self.hd_key and self.hd_key == self.cover.key else 120
         hero = playing_song and self.cover.draw_hero(p, w, h, self.rgb, prog, self.backdrop.energy,
@@ -386,7 +534,7 @@ class LyricsWindow(QWidget):
             p.drawPixmap(QPointF(16, 10), self._text_pixmap(f"{snap['title']} · {snap['artist']}", 13, False,
                                                              (255, 255, 255), False))
             p.setOpacity(1.0)
-        if now - self.toast_t < self.toast_secs:  # aviso en una pastilla oscura (legible sobre portadas claras)
+        if now - self.toast_t < self.toast_secs and self.wheel.button == 0:  # aviso (con la rueda, su etiqueta) en una pastilla oscura (legible sobre portadas claras)
             pm = self._text_pixmap(self.toast_text, 13, False, (255, 255, 255), False)
             tw, th = pm.width() / pm.devicePixelRatio(), pm.height() / pm.devicePixelRatio()
             pill = QRectF(w - tw - 16 - 12, 16 - 6, tw + 24, th + 12)
@@ -400,6 +548,8 @@ class LyricsWindow(QWidget):
             return self._message(p, "Pon algo en YouTube Music ♪")
         if snap["ad"]:
             return self._message(p, "Anuncio · la música vuelve enseguida")
+        if self.style == "kinetic" and self.lines:
+            return self._kinetic(p, pos, now, w, h, gap, hero)
         if not self.lines:
             self._leaving(p, self.trans_P, age)  # la última estrofa termina de irse
             if hero:  # pie discreto del grupo carátula + textos + barra
@@ -442,6 +592,82 @@ class LyricsWindow(QWidget):
         self._extras(p, P, age, old_pts, [(it["x"], it["y"]) for it in items])
         start = words[cur][1]
         self._draw(p, items, (pos - start, start))
+
+    def _kinetic(self, p, pos, now, w, h, gap, hero):
+        """Latido: la línea que suena, grande y centrada; la anterior arriba y la siguiente abajo, tenues."""
+        idx = self.line_index(pos)
+        words = lyrics.words(self.lines[idx][1]) if idx >= 0 else []
+        if gap or not words:
+            if not hero:
+                self._message(p, "♪")
+            return
+        start = self.lines[idx][0]
+        if idx not in self.kin:  # efecto y fuente fijos por línea: un cambio de ambiente no la hace saltar
+            seed = zlib.crc32(f"{self.snap['title']}|{idx}".encode())
+            self.kin[idx] = (kinetic.pick(seed, self.mood), {"calm": "light", "intense": "heavy"}.get(self.mood, ""))
+        effect, kind = self.kin[idx]
+        if kind == "heavy":
+            words = [x.upper() for x in words]
+        times = lyrics.word_times(self.lines, idx)
+        end = self.lines[idx + 1][0] if idx + 1 < len(self.lines) else start + 6
+        light = self.quality.light
+        tint = tuple(round(c + (255 - c) * 0.55) for c in self.rgb)  # pastel: acompaña sin competir con la actual
+        fit = (idx, w, h)
+        px = self.kin.get(fit) or KIN_SIZE * h
+        for _ in range(5):  # como mucho 2 filas: si no caben, letra más pequeña (se calcula una vez por línea)
+            pms = [self._text_pixmap(x, px, True, (255, 255, 255), False, kind) for x in words]
+            dpr = pms[0].devicePixelRatio()
+            widths = [pm.width() / dpr - 8 for pm in pms]  # sin el margen de 4 px de cada lado
+            space = 0.28 * px
+            rows = kinetic.wrap(widths, space, KIN_W * w)
+            if fit in self.kin or len(rows) <= 2 or px < 0.035 * h:
+                break
+            px *= 0.85
+        self.kin[fit] = px
+        lh = px * 1.3
+        top = KIN_Y * h - lh * len(rows) / 2
+        energy, beat = self.backdrop.energy, effects.env(now - self.beat_t, 0.04, 0.18)
+        line_age = pos - start
+        for r, row in enumerate(rows):
+            x = (w - sum(widths[i] for i in row) - space * (len(row) - 1)) / 2
+            for i in row:
+                we = times[i + 1] if i + 1 < len(times) else end
+                tw = pos - times[i]
+                dy, scale, alpha, fill = kinetic.word_state(effect, i, tw, min(we - times[i], 1.5), line_age,
+                                                            energy, beat, now)
+                sung = pos >= we and fill is None
+                if sung:
+                    pm = self._text_pixmap(words[i], px, True, tint, False, kind)
+                elif tw >= 0 and not light:  # la que suena, con halo del color de la portada
+                    pm = self._text_pixmap(words[i], px, True, (255, 255, 255), True, kind)
+                else:
+                    pm = pms[i]
+                pw, ph = pm.width() / dpr * scale, pm.height() / dpr * scale
+                cx, cy = x + widths[i] / 2, top + r * lh + lh / 2 + dy * px
+                target = QRectF(cx - pw / 2, cy - ph / 2, pw, ph)
+                p.setOpacity(min(1.0, alpha * (kinetic.PENDING_ALPHA if fill is not None else 1.0)))
+                p.drawPixmap(target, pm, QRectF(pm.rect()))
+                if fill:  # barrido: la parte ya cantada encima, a plena luz
+                    p.save()
+                    p.setClipRect(QRectF(target.x(), target.y(), (4 + widths[i] * fill) * scale, ph))
+                    p.setOpacity(min(1.0, alpha))
+                    p.drawPixmap(target, pm, QRectF(pm.rect()))
+                    p.restore()
+                x += widths[i] + space
+        # contexto: la línea anterior arriba y la siguiente abajo
+        k = min(1.0, max(0.0, line_age / kinetic.LINE_IN))
+        small = max(11.0, 0.032 * h)
+        for j, alpha, above in ((idx - 1, 0.22, True), (idx + 1, 0.35, False)):
+            ctx = " ".join(lyrics.words(self.lines[j][1])) if 0 <= j < len(self.lines) else ""
+            if not ctx:
+                continue
+            pm = self._text_pixmap(ctx, small, False, (255, 255, 255), False)
+            pw, ph = pm.width() / dpr, pm.height() / dpr
+            f = min(1.0, 0.9 * w / pw)
+            y = top - ph * f - 0.3 * small if above else top + lh * len(rows) + 0.3 * small
+            p.setOpacity(alpha * k)
+            p.drawPixmap(QRectF((w - pw * f) / 2, y, pw * f, ph * f), pm, QRectF(pm.rect()))
+        p.setOpacity(1.0)
 
     def _start_transition(self, k, now):
         """Elige estilo y variación para el cambio de estrofa; la vieja guarda su estado real en pantalla."""
@@ -517,7 +743,8 @@ class LyricsWindow(QWidget):
             if it["current"] and timing:
                 t = min(1.0, timing[0] / FLASH)
                 r *= 0.6 + 0.4 * _out_back(t)  # destello: 0,6 → 1,15 → 1
-                self._sparks(p, pt, it["r"] * it["s"], timing[0], it["seed"], f)
+                if not self.quality.light:
+                    self._sparks(p, pt, it["r"] * it["s"], timing[0], it["seed"], f)
             a = it["alpha"] * it["tw"] * f
             p.setOpacity(min(1.0, a))
             p.drawPixmap(QRectF(pt.x() - r * 3, pt.y() - r * 3, r * 6, r * 6), self.halo, QRectF(self.halo.rect()))
@@ -532,12 +759,12 @@ class LyricsWindow(QWidget):
             if it["la"] > 0.01:
                 self._label(p, pt, it, r, it["la"], it["s"])
 
-    def _text_pixmap(self, text, px, bold, rgb, glow):
+    def _text_pixmap(self, text, px, bold, rgb, glow, kind=""):
         """Texto dibujado una vez en una imagen: se mueve con precisión subpíxel sin vibrar."""
-        key = (text, round(px), bold, rgb, glow)
+        key = (text, round(px), bold, rgb, glow, kind)
         pm = self.labels.get(key)
         if pm is None:
-            font = self._font(px, bold)
+            font = self._font(px, bold, kind)
             fm = QFontMetricsF(font)
             pad = 4
             dpr = self.devicePixelRatioF()
