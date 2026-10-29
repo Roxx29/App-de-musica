@@ -1,0 +1,10 @@
+# Entorno y build (se regeneran con build.bat)
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+*.log
+
+# Ajustes locales de Claude Code
+.claude/settings.local.json
