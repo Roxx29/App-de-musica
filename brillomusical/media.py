@@ -115,11 +115,9 @@ class MediaWatcher(QObject):
                     self._last_hash = digest
             except Exception:
                 log.exception("No se pudo leer la portada")
-        pal, aspect = art["art"]
+        pal, _ = art["art"]
         ad = lyrics.is_ad(props.title, props.artist, props.album_title, duration)
-        # YouTube Music: tiene álbum o portada cuadrada (YouTube normal es 16:9)
-        if not ad and not props.album_title and not (aspect and 0.9 <= aspect <= 1.1):
-            return None
+        # Se acepta todo lo del navegador: el filtro de álbum/portada cuadrada perdía canciones de YouTube Music
         pos = timeline.position.total_seconds()
         stamp = timeline.last_updated_time.timestamp()
         stamp_ok = 0 <= stamp <= time.time()
