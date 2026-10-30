@@ -4,6 +4,8 @@ Ideas del usuario guardadas para hacer. Cuando una se haga, se pasa a `docs/deci
 
 ## 2026-10-29
 
+Las ideas 1 a 4 se hicieron en la v8 (ver `docs/decisiones.md`). Queda la 5.
+
 1. **Controles de YouTube Music desde la app**: un panel que aparece en el lado **izquierdo** de la ventana de la letra al acercar el ratón (anterior, play/pausa, siguiente, avanzar en la canción). Vía controles multimedia de Windows (SMTC); funciona con YouTube Music en el navegador.
 2. **Carrusel vertical a la derecha**: aparece en el lado **derecho**. Al pasar el ratón por una canción, se hace grande. Cada estilo la muestra a su manera:
    - **Cinta**: un disco de vinilo retro / tocadiscos.

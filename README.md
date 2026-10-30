@@ -15,7 +15,8 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 - **Brillo en los bordes**: un halo con los colores de la portada que sigue el ritmo. Puedes elegir entre Estático, Respirar, Al ritmo, Giratorio, Aurora, Destello, Fuego, Ondas y Arcoíris. También puedes dejarlo en **Automático** para que cambie según el ambiente de la canción.
 - **Tres estilos de letra**:
   - **Constelación**: cada estrofa forma una constelación nueva y pasa a la siguiente con una transición (Viaje, Remolino, Explosión, Lluvia de estrellas, Polvo, Reconstelar u Onda). La transición puede ser fija, Aleatoria o Automática.
-  - **Cinta**: fondo blanco hueso y letra negra condensada que avanza por una cinta en S. La cinta se retuerce en perspectiva y al final se ve su reverso en espejo; la palabra que suena toma el color de la portada. Al empezar cada canción aparece un rótulo con el título escrito letra a letra bajo una franja de flechas. Si no hay letra, la cinta repite el título.
+  - **Cinta**: fondo blanco hueso y letra negra condensada que avanza por una cinta en S. La cinta se retuerce en perspectiva y al final se ve su reverso en espejo; la palabra que suena toma el color de la portada. Al empezar cada canción aparece un rótulo con el título escrito letra a letra bajo una franja de flechas. Si no hay letra, la cinta repite el título. Alrededor, dos aros de altavoz laten con la música, una marea de tinta se mueve abajo y en los instrumentales cruza una franja de flechas.
+  - **Automático (según el género)**: la app consulta el género de la canción en iTunes y elige el estilo. Hip-hop, R&B, jazz, indie y alternativa van con Cinta; electrónica, pop, latino, reggaetón y rock, con Latido; clásica, acústica, ambient y bandas sonoras, con Constelación. Si no reconoce el género, usa Constelación.
   - **Latido**: la línea que suena se ve grande y en el centro, con efectos de tipografía cinética que dependen del ambiente. En las canciones tranquilas la letra sube suave o se rellena tipo karaoke. En las normales, las palabras golpean o se mecen. En las intensas, la letra cae en cascada o entra con impacto, en mayúsculas.
 - **Portada de fondo**: difuminada, en movimiento, con efecto Ken Burns o al ritmo. La portada HD sale de iTunes y Deezer.
 - **Carátula**: una tarjeta con título, artista y progreso. Si la canción no tiene letra, o llega un instrumental largo, la carátula se mueve al centro en grande.
@@ -26,16 +27,23 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 
 **Menú de rueda**: acerca el ratón a la parte de arriba, en el centro de la ventana de la letra. Aparecerá un botón. Haz clic en él, o deja el ratón encima un momento, y se abrirá la rueda con Estilo, Transición, Fondo, Carátula, Calidad y Pantalla completa. Cada clic en un sector pasa a la siguiente opción.
 
+**Controles** (lado izquierdo): acerca el ratón al borde izquierdo de la ventana de la letra. Aparecen anterior, −10 s, reproducir/pausa, +10 s y siguiente, que controlan YouTube Music.
+
+**Sonó antes** (lado derecho): acerca el ratón al borde derecho para ver las canciones que han sonado mientras la app está abierta. Al pasar el ratón por una, se hace grande y se ve según el estilo: una galaxia en Constelación, un vinilo girando en Cinta y un altavoz con ondas en Latido. Con un clic se abre en YouTube Music.
+
 **Bandeja**: haz clic derecho en la estrella para ver todas las opciones, también las del efecto del borde y la sincronización de la letra.
 
 **Atajos** (en la ventana de la letra):
 
 | Tecla | Acción |
 |---|---|
+| **Espacio** | Reproducir / pausar |
+| **N** / **P** | Siguiente / anterior canción |
+| **Mayús + ← / →** | Retroceder / avanzar 10 s |
 | **M** | Abrir o cerrar el menú de rueda |
 | **F** / **F11** / doble clic | Pantalla completa |
 | **Esc** | Cerrar la rueda o salir de pantalla completa |
-| **L** | Cambiar el estilo de letra (Constelación / Latido / Cinta) |
+| **L** | Cambiar el estilo de letra (Constelación / Latido / Cinta / Automático) |
 | **B** | Cambiar el fondo |
 | **C** | Cambiar la posición de la carátula |
 | **T** | Cambiar la transición |
@@ -53,7 +61,7 @@ En *Calidad*, el modo **Automática** mide lo que le cuesta a tu equipo mover la
 
 ## Privacidad
 
-BrilloMusical lee la canción que suena desde los controles multimedia de Windows. Para buscar la letra y la portada HD envía **solo el título y el artista** a LRCLIB, iTunes y Deezer. Puedes desactivar la portada HD en *Carátula → Portada HD*. La app no guarda ni envía nada más. La caché está en `%LOCALAPPDATA%\BrilloMusical`.
+BrilloMusical lee la canción que suena desde los controles multimedia de Windows. Para buscar la letra y la portada HD envía **solo el título y el artista** a LRCLIB, iTunes y Deezer. Puedes desactivar la portada HD en *Carátula → Portada HD*. El estilo *Automático (según el género)* también pregunta el género a iTunes con el título y el artista. Al hacer clic en una canción de *Sonó antes* se abre en el navegador una búsqueda de YouTube Music con su título y artista. La lista de *Sonó antes* no se guarda: se borra al cerrar la app. La app no guarda ni envía nada más. La caché está en `%LOCALAPPDATA%\BrilloMusical`.
 
 ## Problemas comunes
 

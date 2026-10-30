@@ -17,7 +17,7 @@ from . import artwork, audio, backdrop, beat, color, cover, kinetic, lyrics, qua
 from .color import FALLBACK
 from .constellation import HELP, SEARCHING, LyricsWindow
 from .glow import Glow
-from .media import MediaWatcher
+from .media import MediaWatcher, position
 from .vsync import FrameClock
 
 DATA = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "BrilloMusical")
@@ -45,6 +45,7 @@ def resource(name):
 class Controller(QObject):
     lyrics_ready = Signal(object, str, object)  # (clave de canción, estado, líneas)
     hd_ready = Signal(object, str, object, object)  # (clave de canción, art_id, fondo, carátula)
+    genre_ready = Signal(object, object)  # (clave de canción, género de iTunes o None)
 
     def __init__(self, app):
         super().__init__()
@@ -73,6 +74,9 @@ class Controller(QObject):
         self.debounce = QTimer(self, singleShot=True, interval=DEBOUNCE_MS, timeout=self._fetch)
         self.watcher = MediaWatcher()
         self.watcher.snapshot.connect(self._on_snapshot)
+        self.window.control.connect(self._control)
+        self.genre_ready.connect(self._on_genre)
+        self.seek = (None, 0.0)  # (destino, hora) del último ±10 s: dos seguidos suman aunque SMTC no haya respondido
         app.aboutToQuit.connect(self.watcher.stop)
         # modo del borde: "auto" decide por canción; uno fijado a mano gana siempre
         self.manual = self.settings.value("glow_mode", "auto")
@@ -117,9 +121,9 @@ class Controller(QObject):
         pulse.toggled.connect(self._toggle_pulse)
         menu.addAction(pulse)
         menu.addSeparator()
-        style = self._choice(menu, "Estilo de letra", kinetic.STYLES, kinetic.STYLE_NAMES, self.window.style,
-                             lambda k: self.window.set_style(k, show=True) or self._update_audio(self.window.snap))
-        self.window.style_changed.connect(lambda k: style[k].setChecked(True) or self._update_audio(self.window.snap))
+        style = self._choice(menu, "Estilo de letra", kinetic.SETTINGS, kinetic.SETTING_NAMES, self.window.style_setting,
+                             lambda k: self.window.set_style(k, show=True) or self._on_style(k))
+        self.window.style_changed.connect(lambda k: style[k].setChecked(True) or self._on_style(k))
         trans = menu.addMenu("Transición entre estrofas")
         trans_group = QActionGroup(trans)
         self.trans_actions = {}
@@ -189,6 +193,42 @@ class Controller(QObject):
             sub.addAction(act)
             acts[key] = act
         return acts
+
+    def _on_style(self, setting):
+        if setting == "auto" and self.track_snap:  # a mitad de canción: su género ya
+            self._fetch_genre(self.track, self.track_snap)
+        self._update_audio(self.window.snap)
+
+    def _fetch_genre(self, key, snap):
+        """Género de la canción en iTunes (manda título y artista, como la portada HD), en segundo plano."""
+        def work():
+            try:
+                self.genre_ready.emit(key, artwork.genre(snap["title"], snap["artist"]))
+            except Exception as e:  # sin conexión: se queda el estilo que hay
+                log.info("Género no disponible: %s", e)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_genre(self, key, genre):
+        if key == self.track:
+            self.window.set_auto_style(kinetic.style_for(genre), genre)
+            self._update_audio(self.window.snap)  # Latido y Cinta necesitan el medidor; Constelación no
+
+    def _control(self, action):
+        """Controles de YouTube Music: los manda a la sesión del navegador que se ve en pantalla."""
+        snap = self.window.snap
+        if action in ("back", "fwd"):
+            if not snap or snap["ad"]:
+                return
+            last, t = self.seek
+            base = last if last is not None and time.monotonic() - t < 1.0 else position(snap)  # sin el desfase de la letra
+            target = base + (10 if action == "fwd" else -10)
+            end = snap["duration"] - 1 if snap["duration"] else target
+            target = max(0.0, min(target, end))
+            self.seek = (target, time.monotonic())
+            self.watcher.command("seek", target)
+        elif not (action == "next" and snap and snap["ad"]):  # en un anuncio YouTube no deja saltar
+            self.watcher.command(action)
 
     def _fullscreen(self):
         self._open()
@@ -409,9 +449,12 @@ class Controller(QObject):
         snap, key = self.track_snap, self.track
         if not snap or not key:
             return
-        if self.hd_art and not self.art_requested:  # una vez por canción, tras la espera de 400 ms
+        if not self.art_requested:  # una vez por canción, tras la espera de 400 ms
             self.art_requested = True
-            self._fetch_art(key, snap)
+            if self.hd_art:
+                self._fetch_art(key, snap)
+            if self.window.style_setting == "auto":
+                self._fetch_genre(key, snap)
         if not snap["duration"] and self.wait_duration < DURATION_WAITS:
             # Windows aún no da la duración: sin ella LRCLIB puede devolver otra versión
             self.wait_duration += 1

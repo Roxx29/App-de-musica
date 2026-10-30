@@ -86,11 +86,29 @@ def _prune():
         pass
 
 
-def _itunes(title, artist):
+def _search(title, artist):
     clean_title, clean_artist = lyrics.clean(title, artist)
     term = f"{_artist(clean_artist)} {clean_title}"
-    results = json.loads(_get(API + "?" + urllib.parse.urlencode({"term": term, "entity": "song", "limit": 10})))
-    return pick(results.get("results", []), title, artist)
+    return json.loads(_get(API + "?" + urllib.parse.urlencode({"term": term, "entity": "song", "limit": 10}))).get(
+        "results", [])
+
+
+def _itunes(title, artist):
+    return pick(_search(title, artist), title, artist)
+
+
+_genres = {}
+
+
+def genre(title, artist):
+    """Género según iTunes (sin país: tienda de EE. UU., nombres en inglés) o None. OSError sin red."""
+    key = (title, artist)
+    if key not in _genres:
+        if len(_genres) > 200:
+            _genres.clear()
+        _genres[key] = next((r.get("primaryGenreName") for r in _search(title, artist)
+                             if _matches(r.get("trackName", ""), r.get("artistName", ""), title, artist)), None)
+    return _genres[key]
 
 
 def _deezer(title, artist, duration):

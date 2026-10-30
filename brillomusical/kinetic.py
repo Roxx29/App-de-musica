@@ -13,8 +13,24 @@ LINE_IN = 0.25  # entrada de la línea
 PENDING_ALPHA = 0.45
 
 
+SETTINGS = ("auto",) + STYLES  # "auto": el estilo lo decide el género de la canción
+SETTING_NAMES = {"auto": "Automático (según el género)", **STYLE_NAMES}
+# géneros de iTunes (tienda de EE. UU., en inglés) → estilo; en orden: "hip-hop" antes que "pop"
+GENRES = (("ribbon", ("hip-hop", "rap", "r&b", "soul", "jazz", "alternative", "indie", "lo-fi", "funk", "blues")),
+          ("kinetic", ("electronic", "dance", "house", "edm", "pop", "latin", "urbano", "reggaeton", "rock", "metal",
+                       "punk")),
+          ("constellation", ("classical", "ambient", "acoustic", "singer/songwriter", "soundtrack", "new age",
+                             "country", "folk", "regional", "christian", "easy listening", "vocal")))
+
+
 def next_style(s):
-    return STYLES[(STYLES.index(s) + 1) % len(STYLES)] if s in STYLES else STYLES[0]
+    return SETTINGS[(SETTINGS.index(s) + 1) % len(SETTINGS)] if s in SETTINGS else SETTINGS[0]
+
+
+def style_for(genre):
+    """Estilo para un género de iTunes; None si no hay género o no se reconoce."""
+    g = (genre or "").lower()
+    return next((style for style, words in GENRES if any(w in g for w in words)), None) if g else None
 
 
 def pick(seed, mood):

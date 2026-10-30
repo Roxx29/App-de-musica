@@ -43,6 +43,7 @@ class MediaWatcher(QObject):
         self._anchor = {}  # app -> (posición, stamp) de la última foto
         self._last_seen = 0.0
         self._stop = threading.Event()
+        self._loop = self._session = None  # para mandar órdenes a la sesión que se ve en pantalla
         self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name="smtc")
         self._thread.start()
 
@@ -50,7 +51,37 @@ class MediaWatcher(QObject):
         self._stop.set()
         self._thread.join(timeout=2)
 
+    def command(self, name, arg=None):
+        """Desde Qt: play / next / prev / seek (segundos). Se ejecuta en el hilo de SMTC."""
+        loop = self._loop
+        if loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(self._command(name, arg), loop)
+            except RuntimeError:
+                pass  # saliendo: el bucle ya se cerró
+
+    async def _command(self, name, arg):
+        s = self._session
+        if s is None:
+            return
+        try:
+            if name == "play":
+                ok = await s.try_toggle_play_pause_async()
+            elif name == "next":
+                ok = await s.try_skip_next_async()
+            elif name == "prev":
+                ok = await s.try_skip_previous_async()
+            elif name == "seek":
+                ok = await s.try_change_playback_position_async(int(arg * 10_000_000))  # en unidades de 100 ns
+            else:
+                return
+            if not ok:
+                log.info("El navegador no aceptó la orden %s", name)
+        except Exception:
+            log.warning("Orden %s fallida (¿pestaña cerrada?)", name, exc_info=True)
+
     async def _run(self):
+        self._loop = asyncio.get_running_loop()
         manager = None
         while not self._stop.is_set():
             snap = None
@@ -84,7 +115,9 @@ class MediaWatcher(QObject):
                 log.warning("Sesión con error, se ignora", exc_info=True)
                 continue
             if snap:
+                self._session = s
                 return snap
+        self._session = None
         return None
 
     async def _read(self, session):
