@@ -26,6 +26,8 @@ Las ideas 6, 7 y 8 (opción A) se hicieron en la v9, como prototipo.
 
 ## 2026-10-30 (Latido distinto y modo nuevo)
 
+Hechas en la v10: Latido como Pulso + Onda (9) y el estilo Nueva York (10).
+
 9. **Latido distinto de Constelación** (propuestas de los agentes; sin decidir). Base común: quitar a Latido las estrellas, la nebulosa y la portada difuminada.
    - **Pulso** (recomendada): fondo de color liso de la portada que se aclara con cada golpe; letra blanca gigante, gruesa y en mayúsculas, abajo a la izquierda; la palabra que suena crece con el golpe.
    - **Onda**: fondo negro mate y anillos del color de la portada que salen del centro con cada golpe (varios en drops y estribillos).

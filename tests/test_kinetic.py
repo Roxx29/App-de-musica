@@ -34,11 +34,12 @@ class TestKinetic(unittest.TestCase):
         self.assertIn(kinetic.pick(7, "raro"), kinetic.EFFECTS["normal"])
         self.assertEqual(kinetic.next_style("constellation"), "kinetic")
         self.assertEqual(kinetic.next_style("kinetic"), "ribbon")
-        self.assertEqual(kinetic.next_style("ribbon"), "auto")
+        self.assertEqual(kinetic.next_style("ribbon"), "nyc")
+        self.assertEqual(kinetic.next_style("nyc"), "auto")
         self.assertEqual(kinetic.next_style("auto"), "constellation")
 
     def test_estilo_por_genero(self):
-        for genre, style in (("Hip-Hop/Rap", "ribbon"), ("R&B/Soul", "ribbon"), ("Pop Latino", "kinetic"),
+        for genre, style in (("Hip-Hop/Rap", "nyc"), ("R&B/Soul", "ribbon"), ("Pop Latino", "kinetic"),
                              ("K-Pop", "kinetic"), ("Dance", "kinetic"), ("Classical", "constellation"),
                              ("Singer/Songwriter", "constellation"), ("ALTERNATIVE", "ribbon")):
             self.assertEqual(kinetic.style_for(genre), style, genre)

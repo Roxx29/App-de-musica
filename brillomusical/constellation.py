@@ -10,14 +10,14 @@ import random
 import threading
 import time
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QFontInfo, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from . import (backdrop, cover, effects, history, kinetic, layout, lyrics, media, panels, quality, ribbon, transitions,
-               wheel, ytm)
+from . import (backdrop, cover, effects, history, kinetic, layout, lyrics, media, nyc, panels, quality, ribbon,
+               transitions, wheel, ytm)
 from .color import FALLBACK
 
 # tamaños en fracción de la altura de la ventana: (estrella, texto)
@@ -31,7 +31,8 @@ SEARCHING = "Buscando letra…"
 HELP = "Espacio play/pausa · N/P siguiente/anterior · Mayús+←/→ ±10 s · M menú · F pantalla completa · L estilo · B fondo · C carátula · T transición · ←/→ sincronizar · H atajos"
 FIRST_TIP = "Acerca el ratón a los bordes: menú arriba, controles a la izquierda, canciones a la derecha"
 CURSOR_HIDE = 2500  # ms quieto en pantalla completa antes de ocultar el cursor
-KIN_SIZE, KIN_Y, KIN_W = 0.075, 0.46, 0.82  # Latido: letra (·alto), centro vertical y anchura máxima (·ancho)
+# Latido: letra (·alto), mínimo, base de la última fila (·alto), margen izquierdo y anchura máxima (·ancho)
+KIN_SIZE, KIN_MIN, KIN_Y, KIN_X, KIN_W = 0.13, 0.08, 0.90, 0.06, 0.88
 
 
 def _out_cubic(t):
@@ -66,6 +67,7 @@ class LyricsWindow(QWidget):
     control = Signal(str)  # play / next / prev / back / fwd hacia YouTube Music
     song = Signal(object)  # clic en el carrusel: (tipo, canción, índice en la cola)
     open_ytm = Signal()  # rueda: abrir YouTube Music integrado
+    nyc_bg_changed = Signal(str)  # B en Nueva York: siguiente fondo de ese estilo
     style_changed = Signal(str)  # L: Automático / Constelación / Latido / Cinta
     quality_changed = Signal(str)
 
@@ -81,6 +83,11 @@ class LyricsWindow(QWidget):
         self.kin = {}  # Latido: (efecto, fuente) elegidos al aparecer cada línea
         self.glyphs, self.rib, self.rib_track = {}, None, None  # Cinta: letras sueltas, texto y curva en caché
         self.beat_t = -1e9
+        self.beats = deque(maxlen=6)  # golpes recientes: anillos de Latido
+        self.nyc_bg = settings.value("nyc_bg", "asphalt")
+        if self.nyc_bg not in nyc.BGS:
+            self.nyc_bg = "asphalt"
+        self.nyc_cache, self.nyc_words, self.grain, self.vignette, self.gray = None, {}, None, None, (None, None)
         self.wheel = wheel.Wheel()
         self.panels = panels.Panels()
         self.history = history.History()
@@ -200,6 +207,7 @@ class LyricsWindow(QWidget):
 
     def set_drop(self):
         self.drop_t = time.monotonic()
+        self.beats.extend((self.drop_t, self.drop_t + 0.09, self.drop_t + 0.18))  # Latido: tres anillos
 
     def in_gap(self):
         """¿Está sonando un instrumental largo? (para el fondo automático)."""
@@ -281,6 +289,15 @@ class LyricsWindow(QWidget):
     def beat(self):
         self.backdrop.beat()
         self.beat_t = time.monotonic()
+        self.beats.append(self.beat_t)
+
+    def set_nyc_bg(self, bg, show=False):
+        if bg in nyc.BGS:
+            self.nyc_bg = bg
+            self.settings.setValue("nyc_bg", bg)
+            if show:
+                self.toast(f"Fondo: {nyc.BG_NAMES[bg]}")
+            self.update()
 
     def set_style(self, setting, show=False):
         if setting in kinetic.SETTINGS:
@@ -354,7 +371,10 @@ class LyricsWindow(QWidget):
 
     def cycle(self, action):
         """Siguiente opción de una acción (teclas y rueda); avisa a la bandeja para marcarla."""
-        if action == "bg":
+        if action == "bg" and self.style == "nyc":  # Nueva York tiene sus propios fondos
+            self.set_nyc_bg(nyc.next_bg(self.nyc_bg), show=True)
+            self.nyc_bg_changed.emit(self.nyc_bg)
+        elif action == "bg":
             self.set_bg(backdrop.next_mode(self.backdrop.setting), show=True)
             self.bg_changed.emit(self.backdrop.setting)
         elif action == "transition":
@@ -377,7 +397,7 @@ class LyricsWindow(QWidget):
     def wheel_value(self, action):
         style = kinetic.STYLE_NAMES[self.style]
         return {"style": f"Automático · {style}" if self.style_setting == "auto" else style, "transition": transitions.SETTING_NAMES[self.trans_setting],
-                "bg": backdrop.NAMES[self.backdrop.setting], "cover": cover.NAMES[self.cover.mode],
+                "bg": nyc.BG_NAMES[self.nyc_bg] if self.style == "nyc" else backdrop.NAMES[self.backdrop.setting], "cover": cover.NAMES[self.cover.mode],
                 "quality": quality.NAMES[self.quality.setting],
                 "fullscreen": "salir" if self.isFullScreen() else "activar", "ytm": "abrir"}[action]
 
@@ -499,6 +519,7 @@ class LyricsWindow(QWidget):
     def resizeEvent(self, e):
         self.bg = self.nebula = None
         self.glyphs.clear()
+        self.nyc_words.clear()  # Nueva York dibuja cada palabra a 0,3 del alto
         self.labels.clear()  # los tamaños de letra dependen de la altura
         self.stanza_cache.clear()  # y la esquina reservada para la tarjeta
         super().resizeEvent(e)
@@ -627,11 +648,17 @@ class LyricsWindow(QWidget):
         light = self.quality.light
         if self.style == "ribbon":
             return self._ribbon(p, now, w, h)
+        if self.style == "nyc":
+            return self._nyc(p, now, w, h)
         if self.bg is None:
             self._build_bg()
         age = now - self.trans_t0  # tiempo desde el último cambio de estrofa
         push = transitions.push(self.trans_P, age) if self.trans_P and not light else 0.0  # Ligera: sin ampliar el fondo
-        self.backdrop.draw(p, w, h, push=push, live=self.animating)
+        pulse = self.style == "kinetic"  # Latido: color liso de la portada que late, sin estrellas
+        if pulse:
+            self._pulse(p, now, w, h)
+        else:
+            self.backdrop.draw(p, w, h, push=push, live=self.animating)
         snap = self.snap
         pos = self.position() if snap else 0.0
         playing_song = bool(snap) and not snap["ad"]
@@ -641,15 +668,15 @@ class LyricsWindow(QWidget):
                      and (self.status != SEARCHING or self.cover.hero_on))
         gap = playing_song and bool(self.lines) and any(a <= pos <= b for a, b in self.gaps)
         self.cover.set_hero(no_lyrics or gap, 1.0 if no_lyrics else 0.7)
-        if self.cover.mode == "center":  # se apaga a la vez que llega la carátula grande (sin parpadeo)
+        if self.cover.mode == "center" and not pulse:  # se apaga a la vez que llega la carátula grande (sin parpadeo)
             self.cover.draw_watermark(p, w, h, push, self.devicePixelRatioF(), 1 - self.cover.hero_progress())
-        if not light:  # Ligera: sin estrellas que titilan ni nebulosa
+        if not light and not pulse:  # Ligera: sin estrellas que titilan ni nebulosa
             self._background(p, now, w, h)
         prog = cover.progress(pos - self.offset, snap["duration"]) if snap else None
         native = 1000 if self.hd_key and self.hd_key == self.cover.key else 120
         hero = playing_song and self.cover.draw_hero(p, w, h, self.rgb, prog, self.backdrop.energy,
                                                      self.devicePixelRatioF(), native)
-        if playing_song and not hero and self.cover.mode in ("card", "top"):
+        if playing_song and not hero and (self.cover.mode == "top" or self.cover.mode == "card" and not pulse):
             self.cover.draw_front(p, w, h, self.rgb, prog, self.devicePixelRatioF())
         elif snap and not hero:
             p.setOpacity(0.4)
@@ -897,55 +924,275 @@ class LyricsWindow(QWidget):
             p.drawText(QPointF(tx, top + len(rows) * lh + 0.045 * h), artist)
             p.setOpacity(1.0)
 
+    # --- Nueva York ---
+    def _nyc_line(self, pos, fm):
+        """(palabras, inicios, rectángulos, inicio de la siguiente línea) del bloque que toca; una vez por línea."""
+        snap = self.snap
+        title = snap["title"].upper()
+        tl = [i for i, (_, x) in enumerate(self.lines) if lyrics.words(x)]  # líneas con texto
+        k = bisect.bisect_right([self.lines[i][0] for i in tl], pos) - 1
+        key = (tl[k] if k >= 0 else None, title)
+        if self.nyc_cache and self.nyc_cache[0] == key and self.nyc_cache[1] is self.lines:
+            return self.nyc_cache[2]
+        self.nyc_words.clear()
+        h = fm.height()
+        aspect = lambda x: fm.horizontalAdvance(x) / h  # noqa: E731
+        if k < 0:  # antes de la primera línea: el título solo
+            ws, starts = [title], [0.0]
+        else:
+            i = tl[k]
+            ws = [x.upper() for x in lyrics.words(self.lines[i][1])]
+            starts = lyrics.word_times(self.lines, i)
+            if k > 0:  # la última de la línea anterior abre el bloque (de ahí viene el zoom)
+                j = tl[k - 1]
+                ws.insert(0, lyrics.words(self.lines[j][1])[-1].upper())
+                starts.insert(0, self.lines[i][0] - 1e-3)
+            else:
+                ws.insert(0, title)
+                starts.insert(0, min(0.0, self.lines[i][0] - 1e-3))
+        t_next = self.lines[tl[k + 1]][0] if k + 1 < len(tl) else None
+        durs = [min(1.5, b - a) for a, b in zip(starts, starts[1:] + [t_next or starts[-1] + 1.0])]
+        info = [(aspect(x), d, len(x)) for x, d in zip(ws, durs)]
+        first = None
+        if k > 0:  # mismo alto que tenía al final de la línea anterior: el zoom enlaza sin salto
+            j = tl[k - 1]
+            prev_last = lyrics.word_times(self.lines, j)[-1]
+            first = nyc.size(len(ws[0]), min(1.5, self.lines[tl[k]][0] - prev_last)) * 1.4
+        rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
+        data = (ws, starts, rects, t_next)
+        self.nyc_cache = (key, self.lines, data)
+        return data
+
+    def _nyc_bg(self, p, w, h, now, cam):
+        """Asfalto, portada en blanco y negro o plano de Manhattan; con grano y viñeta."""
+        light = self.quality.light
+        if self.nyc_bg == "city":
+            p.fillRect(self.rect(), QColor(11, 11, 12))
+            p.save()
+            p.translate(w / 2, h / 2)
+            p.rotate(29)  # la cuadrícula de Manhattan va girada unos 29°
+            step = 0.045 * h
+            ox = 0.0 if light else -(cam[0] * cam[2] * 0.5) % (5 * step)  # paralaje: la mitad que el texto
+            oy = 0.0 if light else -(cam[1] * cam[2] * 0.5) % (5 * step)
+            reach = math.hypot(w, h) / 2 + 5 * step
+            n = int(reach / step) + 5
+            for k in range(-n, n + 1):
+                avenue = k % 5 == 0
+                p.setPen(QPen(QColor(255, 255, 255, 31 if avenue else 18), 2 if avenue else 1))
+                p.drawLine(QPointF(k * step + ox, -reach), QPointF(k * step + ox, reach))
+                p.drawLine(QPointF(-reach, k * step + oy), QPointF(reach, k * step + oy))
+            p.restore()
+        elif self.nyc_bg == "cover" and self.backdrop.tex is not None:
+            img = self.backdrop.tex[0]
+            if self.gray[0] is not img:
+                self.gray = (img, img.convertToFormat(QImage.Format_Grayscale8))
+            x, y, cw, ch = backdrop.cover_rect(w / max(1, h))
+            g = self.gray[1]
+            p.drawImage(QRectF(0, 0, w, h), g, QRectF(x * g.width(), y * g.height(), cw * g.width(), ch * g.height()))
+            p.fillRect(self.rect(), QColor(0, 0, 0, 184))  # oscurecida: las placas negras siguen mandando
+        else:
+            p.fillRect(self.rect(), QColor(13, 13, 14))
+        if not light:  # grano de película, cambia a 12 fps
+            if self.grain is None:
+                rnd = random.Random(7)
+                g = QImage(128, 128, QImage.Format_ARGB32)
+                for yy in range(128):
+                    for xx in range(128):
+                        v = rnd.randint(0, 255)
+                        g.setPixelColor(xx, yy, QColor(v, v, v, 15))
+                self.grain = QPixmap.fromImage(g)
+            f = int(now * 12)
+            p.drawTiledPixmap(QRectF(self.rect()), self.grain, offset=QPointF((f * 37) % 128, (f * 71) % 128))
+        if self.vignette is None or self.vignette.size() != self.size():
+            self.vignette = QPixmap(self.size())
+            self.vignette.fill(Qt.transparent)
+            q = QPainter(self.vignette)
+            grad = QRadialGradient(QPointF(w / 2, h / 2), math.hypot(w, h) / 2)
+            grad.setColorAt(0.55, QColor(0, 0, 0, 0))
+            grad.setColorAt(1, QColor(0, 0, 0, 153))
+            q.fillRect(self.vignette.rect(), grad)
+            q.end()
+        p.drawPixmap(0, 0, self.vignette)
+
+    def _nyc_word(self, text, px):
+        """Palabra blanca sin sombra en caché (se apaga a gris con opacidad, no con otra imagen)."""
+        pm = self.nyc_words.get(text)
+        if pm is None:
+            font = self._font(px, True, "heavy")
+            fm = QFontMetricsF(font)
+            dpr = self.devicePixelRatioF()
+            pm = QPixmap(math.ceil(fm.horizontalAdvance(text) * dpr) + 2, math.ceil(fm.height() * dpr) + 2)
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            q = QPainter(pm)
+            q.setRenderHint(QPainter.TextAntialiasing)
+            q.setFont(font)
+            q.setPen(QColor(255, 255, 255))
+            q.drawText(QPointF(0, fm.ascent()), text)
+            q.end()
+            self.nyc_words[text] = pm
+        return pm
+
+    def _nyc(self, p, now, w, h):
+        """Nueva York: crucigrama de palabras en placas negras, zoom a la última al acabar cada línea."""
+        snap = self.snap
+        if not snap or snap["ad"]:
+            self._nyc_bg(p, w, h, now, (0, 0, 1))
+            return self._message(p, "Pon algo en YouTube Music ♪" if not snap else "Anuncio · la música vuelve enseguida",
+                                 rgb=(255, 255, 255))
+        pos, light = self.position(), self.quality.light
+        ref = 0.3 * h  # tamaño al que se dibuja cada palabra (luego se escala con la cámara)
+        fm = QFontMetricsF(self._font(ref, True, "heavy"))
+        ws, starts, rects, t_next = self._nyc_line(pos, fm)
+        cam = nyc.camera(pos, starts, rects, t_next, w, h)
+        cx, cy, sc, others = cam
+        self._nyc_bg(p, w, h, now, cam)
+        k = max(0, bisect.bisect_right(starts, pos) - 1)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, not light)
+
+        def screen(r):
+            return QRectF((r[0] - cx) * sc + w / 2, (r[1] - cy) * sc + h / 2, r[2] * sc, r[3] * sc)
+
+        for i in range(k + 1):  # placas negras de esquinas redondeadas (las que se tocan se ven unidas)
+            alpha = 1.0 if i == len(rects) - 1 else others
+            if alpha <= 0:
+                continue
+            r = screen(rects[i])
+            m = 0.18 * min(r.width(), r.height())
+            path = QPainterPath()
+            plate = r.adjusted(-m, -m, m, m)
+            path.addRoundedRect(plate, min(48.0, 0.18 * plate.height(), 0.18 * plate.width()),
+                                min(48.0, 0.18 * plate.height(), 0.18 * plate.width()))
+            p.setOpacity(alpha)
+            p.fillPath(path, QColor(0, 0, 0, 235))
+        for i in range(k + 1):
+            alpha = 1.0 if i == len(rects) - 1 else others
+            if alpha <= 0:
+                continue
+            r = screen(rects[i])
+            tw = pos - starts[i]
+            s = 1.0 if light or tw > 0.22 or i == 0 else 1 + 0.12 * (1 - _out_back(min(1.0, tw / 0.22)))
+            grey = nyc.GREYS[min(k - i, 3)] / 255  # blanco sobre negro: la opacidad da el gris
+            pm = self._nyc_word(ws[i], ref)
+            p.save()
+            p.translate(r.center())
+            if rects[i][4]:
+                p.rotate(-90)  # vertical, leyendo hacia arriba
+                tw_, th_ = r.height(), r.width()
+            else:
+                tw_, th_ = r.width(), r.height()
+            p.scale(s, s)
+            p.setOpacity(alpha * grey)
+            p.drawPixmap(QRectF(-tw_ / 2, -th_ / 2, tw_, th_), pm, QRectF(pm.rect()))
+            p.restore()
+        p.setOpacity(1.0)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        self._nyc_signs(p, w, h, snap)
+        if not self.lines and self.status:
+            self._message(p, self.status, y=0.86, alpha=0.5, size=0.022 * h, rgb=(255, 255, 255))
+        d = now - self.drop_t  # drop: la pantalla se invierte un instante
+        if 0 <= d < 0.29:
+            a = min(1.0, d / 0.06) if d < 0.15 else max(0.0, 1 - (d - 0.15) / 0.14)
+            p.save()
+            p.setCompositionMode(QPainter.CompositionMode_Difference)
+            p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * (0.6 if light else a))))
+            p.restore()
+
+    def _nyc_signs(self, p, w, h, snap):
+        """Detalles de Nueva York: círculo de línea de metro con la inicial del artista y letrero con el título."""
+        d = 0.055 * h
+        m = 0.04 * h
+        c = QPointF(m + d / 2, h - m - d / 2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255))
+        p.drawEllipse(c, d / 2, d / 2)
+        p.setPen(QColor(0, 0, 0))
+        p.setFont(self._font(0.6 * d, True, "heavy"))
+        p.drawText(QRectF(c.x() - d / 2, c.y() - d / 2, d, d), Qt.AlignCenter, (snap["artist"] or "?")[:1].upper())
+        sh = 0.032 * h
+        font = self._font(max(9.0, 0.5 * sh), True)
+        fm = QFontMetricsF(font)
+        text = fm.elidedText(snap["title"].upper(), Qt.ElideRight, 0.35 * w)
+        sign = QRectF(c.x() + d / 2 + 12, c.y() - sh / 2, fm.horizontalAdvance(text) + sh, sh)
+        path = QPainterPath()
+        path.addRoundedRect(sign, 4, 4)
+        p.fillPath(path, QColor(0, 0, 0))
+        p.setPen(QPen(QColor(255, 255, 255), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(sign.adjusted(3, 3, -3, -3), 2, 2)
+        p.setPen(QColor(255, 255, 255))
+        p.setFont(font)
+        p.drawText(sign, Qt.AlignCenter, text)
+
+    def _pulse_color(self, now):
+        """Fondo de Latido: el color de la portada, intenso y oscuro para que se lea el blanco; se aclara con el golpe."""
+        c = QColor(*self.rgb)
+        lift = (0.14 if now - self.drop_t < 0.3 else 0.08) * effects.env(now - self.beat_t, 0.04, 0.26)
+        if self.quality.light:
+            lift = min(lift, 0.05)
+        c.setHslF(c.hslHueF(), max(0.6, min(0.85, c.hslSaturationF())), max(0.38, min(0.45, c.lightnessF())) + lift)
+        return c
+
+    def _pulse(self, p, now, w, h):
+        """Latido: fondo liso que late y un anillo que sale del centro con cada golpe (tres en un drop)."""
+        p.fillRect(self.rect(), self._pulse_color(now))
+        ring = QColor(*self.rgb)
+        ring.setHslF(ring.hslHueF(), max(0.6, min(0.85, ring.hslSaturationF())), min(0.9, max(0.38, min(0.45, ring.lightnessF())) + 0.22))
+        diag = math.hypot(w, h)
+        light = self.quality.light
+        live = [t for t in self.beats if 0 <= now - t < 0.9][-(2 if light else 6):]
+        p.setBrush(Qt.NoBrush)
+        for t in live:
+            f = (now - t) / 0.9
+            e = 1 - (1 - f) ** 2  # ease-out
+            ring.setAlphaF(0.55 * (1 - f))
+            p.setPen(QPen(ring, 3 if light else 6 - 5 * f))
+            r = diag * (0.05 + 0.95 * e) / 2
+            p.drawEllipse(QPointF(w / 2, h / 2), r, r)
+
     def _kinetic(self, p, pos, now, w, h, gap, hero):
-        """Latido: la línea que suena, grande y centrada; la anterior arriba y la siguiente abajo, tenues."""
+        """Latido: la línea que suena, blanca, gigante y abajo a la izquierda; la anterior encima, tenue."""
         idx = self.line_index(pos)
-        words = lyrics.words(self.lines[idx][1]) if idx >= 0 else []
+        words = [x.upper() for x in lyrics.words(self.lines[idx][1])] if idx >= 0 else []
         if gap or not words:
             if not hero:
-                self._message(p, "♪")
+                self._message(p, "♪", rgb=(255, 255, 255))
             return
         start = self.lines[idx][0]
-        if idx not in self.kin:  # efecto y fuente fijos por línea: un cambio de ambiente no la hace saltar
-            seed = zlib.crc32(f"{self.snap['title']}|{idx}".encode())
-            self.kin[idx] = (kinetic.pick(seed, self.mood), {"calm": "light", "intense": "heavy"}.get(self.mood, ""))
-        effect, kind = self.kin[idx]
-        if kind == "heavy":
-            words = [x.upper() for x in words]
+        if idx not in self.kin:  # efecto fijo por línea: un cambio de ambiente no la hace saltar
+            self.kin[idx] = kinetic.pick(zlib.crc32(f"{self.snap['title']}|{idx}".encode()), self.mood)
+        effect = self.kin[idx]
         times = lyrics.word_times(self.lines, idx)
         end = self.lines[idx + 1][0] if idx + 1 < len(self.lines) else start + 6
         light = self.quality.light
-        tint = tuple(round(c + (255 - c) * 0.55) for c in self.rgb)  # pastel: acompaña sin competir con la actual
+        sung_rgb = tuple(round(c + (255 - c) * 0.55) for c in self._pulse_color(-1e9).getRgb()[:3])  # tono sobre tono
         fit = (idx, w, h)
         px = self.kin.get(fit) or KIN_SIZE * h
-        for _ in range(5):  # como mucho 2 filas: si no caben, letra más pequeña (se calcula una vez por línea)
-            pms = [self._text_pixmap(x, px, True, (255, 255, 255), False, kind) for x in words]
+        for _ in range(5):  # como mucho 3 filas: si no caben, letra más pequeña (se calcula una vez por línea)
+            pms = [self._text_pixmap(x, px, True, (255, 255, 255), False, "heavy") for x in words]
             dpr = pms[0].devicePixelRatio()
             widths = [pm.width() / dpr - 8 for pm in pms]  # sin el margen de 4 px de cada lado
-            space = 0.28 * px
+            space = 0.25 * px
             rows = kinetic.wrap(widths, space, KIN_W * w)
-            if fit in self.kin or len(rows) <= 2 or px < 0.035 * h:
+            if fit in self.kin or len(rows) <= 3 or px < KIN_MIN * h:
                 break
             px *= 0.85
         self.kin[fit] = px
-        lh = px * 1.3
-        top = KIN_Y * h - lh * len(rows) / 2
-        energy, beat = self.backdrop.energy, effects.env(now - self.beat_t, 0.04, 0.18)
+        lh = px * 1.05
+        top = KIN_Y * h - lh * len(rows)
+        energy, beat = self.backdrop.energy, effects.env(now - self.beat_t, 0.05, 0.22)
         line_age = pos - start
         for r, row in enumerate(rows):
-            x = (w - sum(widths[i] for i in row) - space * (len(row) - 1)) / 2
+            x = KIN_X * w
             for i in row:
                 we = times[i + 1] if i + 1 < len(times) else end
                 tw = pos - times[i]
                 dy, scale, alpha, fill = kinetic.word_state(effect, i, tw, min(we - times[i], 1.5), line_age,
-                                                            energy, beat, now)
+                                                            0.0 if light else energy, 0.0 if light else beat, now)
+                if 0 <= tw < we - times[i] and not light:
+                    scale *= 1 + 0.10 * beat  # la que suena crece con el golpe
                 sung = pos >= we and fill is None
-                if sung:
-                    pm = self._text_pixmap(words[i], px, True, tint, False, kind)
-                elif tw >= 0 and not light:  # la que suena, con halo del color de la portada
-                    pm = self._text_pixmap(words[i], px, True, (255, 255, 255), True, kind)
-                else:
-                    pm = pms[i]
+                pm = self._text_pixmap(words[i], px, True, sung_rgb, False, "heavy") if sung else pms[i]
                 pw, ph = pm.width() / dpr * scale, pm.height() / dpr * scale
                 cx, cy = x + widths[i] / 2, top + r * lh + lh / 2 + dy * px
                 target = QRectF(cx - pw / 2, cy - ph / 2, pw, ph)
@@ -958,19 +1205,14 @@ class LyricsWindow(QWidget):
                     p.drawPixmap(target, pm, QRectF(pm.rect()))
                     p.restore()
                 x += widths[i] + space
-        # contexto: la línea anterior arriba y la siguiente abajo
-        k = min(1.0, max(0.0, line_age / kinetic.LINE_IN))
-        small = max(11.0, 0.032 * h)
-        for j, alpha, above in ((idx - 1, 0.22, True), (idx + 1, 0.35, False)):
-            ctx = " ".join(lyrics.words(self.lines[j][1])) if 0 <= j < len(self.lines) else ""
-            if not ctx:
-                continue
-            pm = self._text_pixmap(ctx, small, False, (255, 255, 255), False)
+        # la línea anterior, más pequeña y tenue, encima
+        prev = " ".join(lyrics.words(self.lines[idx - 1][1])).upper() if idx > 0 else ""
+        if prev:
+            pm = self._text_pixmap(prev, 0.45 * px, True, (255, 255, 255), False, "heavy")
             pw, ph = pm.width() / dpr, pm.height() / dpr
-            f = min(1.0, 0.9 * w / pw)
-            y = top - ph * f - 0.3 * small if above else top + lh * len(rows) + 0.3 * small
-            p.setOpacity(alpha * k)
-            p.drawPixmap(QRectF((w - pw * f) / 2, y, pw * f, ph * f), pm, QRectF(pm.rect()))
+            f = min(1.0, KIN_W * w / pw)
+            p.setOpacity(0.45 * min(1.0, max(0.0, line_age / kinetic.LINE_IN)))
+            p.drawPixmap(QRectF(KIN_X * w, top - ph * f - 0.1 * px, pw * f, ph * f), pm, QRectF(pm.rect()))
         p.setOpacity(1.0)
 
     def _start_transition(self, k, now):

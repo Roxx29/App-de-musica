@@ -13,7 +13,7 @@ from PySide6.QtCore import QCoreApplication, QLockFile, QObject, QSettings, Qt, 
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import artwork, audio, backdrop, beat, color, cover, history, kinetic, lyrics, quality, transitions, ytm
+from . import artwork, audio, backdrop, beat, color, cover, history, kinetic, lyrics, nyc, quality, transitions, ytm
 from .color import FALLBACK
 from .constellation import HELP, SEARCHING, LyricsWindow
 from .glow import Glow
@@ -133,6 +133,9 @@ class Controller(QObject):
         style = self._choice(menu, "Estilo de letra", kinetic.SETTINGS, kinetic.SETTING_NAMES, self.window.style_setting,
                              lambda k: self.window.set_style(k, show=True) or self._on_style(k))
         self.window.style_changed.connect(lambda k: style[k].setChecked(True) or self._on_style(k))
+        nyc_bg = self._choice(menu, "Fondo de Nueva York", nyc.BGS, nyc.BG_NAMES, self.window.nyc_bg,
+                              lambda k: self.window.set_nyc_bg(k, show=True))
+        self.window.nyc_bg_changed.connect(lambda k: nyc_bg[k].setChecked(True))
         trans = menu.addMenu("Transición entre estrofas")
         trans_group = QActionGroup(trans)
         self.trans_actions = {}
