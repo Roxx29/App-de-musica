@@ -45,6 +45,13 @@ class TestNyc(unittest.TestCase):
             self.assertAlmostEqual(a, b, places=3)  # al empezar la línea siguiente, el mismo plano
         self.assertLess(end[3], 0.01)  # las demás ya se han apagado
 
+    def test_zoom_aunque_la_ultima_llegue_tarde(self):
+        rects = nyc.place(words(random.Random(4), 4), 2)
+        starts, t_next = [10.0, 10.2, 10.4, 10.9], 11.0  # la última, 0,1 s antes de la línea siguiente
+        end = nyc.camera(t_next - 1e-9, starts, rects, t_next, 1600, 900)
+        for a, b in zip(end[:3], nyc.frame(rects[-1:], 1600, 900)):
+            self.assertAlmostEqual(a, b, places=3)
+
     def test_fondos(self):
         self.assertEqual([nyc.next_bg(b) for b in nyc.BGS], ["cover", "city", "asphalt"])
         self.assertEqual(nyc.next_bg("raro"), "asphalt")

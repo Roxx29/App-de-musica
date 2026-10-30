@@ -317,6 +317,7 @@ class LyricsWindow(QWidget):
 
     def _apply_style(self, style):
         self.style = style
+        self.nyc_words.clear()  # pixmaps grandes de Nueva York: fuera al cambiar de estilo
         # al volver a Constelación no hay transición desde una estrofa vieja
         self.shown, self.last_items, self.old_items, self.leaving_now = None, [], [], []
         self.update()
@@ -929,12 +930,11 @@ class LyricsWindow(QWidget):
         """(palabras, inicios, rectángulos, inicio de la siguiente línea) del bloque que toca; una vez por línea."""
         snap = self.snap
         title = snap["title"].upper()
-        tl = [i for i, (_, x) in enumerate(self.lines) if lyrics.words(x)]  # líneas con texto
+        tl = [i for i, (_, x) in enumerate(self.lines) if any(c.isalnum() for c in x)]  # con texto (no "♪")
         k = bisect.bisect_right([self.lines[i][0] for i in tl], pos) - 1
         key = (tl[k] if k >= 0 else None, title)
         if self.nyc_cache and self.nyc_cache[0] == key and self.nyc_cache[1] is self.lines:
             return self.nyc_cache[2]
-        self.nyc_words.clear()
         h = fm.height()
         aspect = lambda x: fm.horizontalAdvance(x) / h  # noqa: E731
         if k < 0:  # antes de la primera línea: el título solo
@@ -946,7 +946,7 @@ class LyricsWindow(QWidget):
             if k > 0:  # la última de la línea anterior abre el bloque (de ahí viene el zoom)
                 j = tl[k - 1]
                 ws.insert(0, lyrics.words(self.lines[j][1])[-1].upper())
-                starts.insert(0, self.lines[i][0] - 1e-3)
+                starts.insert(0, min(self.lines[i][0], starts[0]) - 1e-3)  # antes que la primera, siempre
             else:
                 ws.insert(0, title)
                 starts.insert(0, min(0.0, self.lines[i][0] - 1e-3))
@@ -961,6 +961,8 @@ class LyricsWindow(QWidget):
         rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
         data = (ws, starts, rects, t_next)
         self.nyc_cache = (key, self.lines, data)
+        for x in [x for x in self.nyc_words if x[0] not in ws]:  # se queda la que pasa al bloque nuevo
+            del self.nyc_words[x]
         return data
 
     def _nyc_bg(self, p, w, h, now, cam):
@@ -1012,11 +1014,16 @@ class LyricsWindow(QWidget):
             grad.setColorAt(1, QColor(0, 0, 0, 153))
             q.fillRect(self.vignette.rect(), grad)
             q.end()
-        p.drawPixmap(0, 0, self.vignette)
+        if not light:
+            p.drawPixmap(0, 0, self.vignette)
 
     def _nyc_word(self, text, px):
         """Palabra blanca sin sombra en caché (se apaga a gris con opacidad, no con otra imagen)."""
-        pm = self.nyc_words.get(text)
+        font = self._font(px, True, "heavy")
+        fm = QFontMetricsF(font)
+        px = min(px, px * 1.5 * self.width() / max(1.0, fm.horizontalAdvance(text)))  # 4K o título largo: memoria acotada
+        key = (text, round(px))
+        pm = self.nyc_words.get(key)
         if pm is None:
             font = self._font(px, True, "heavy")
             fm = QFontMetricsF(font)
@@ -1030,7 +1037,7 @@ class LyricsWindow(QWidget):
             q.setPen(QColor(255, 255, 255))
             q.drawText(QPointF(0, fm.ascent()), text)
             q.end()
-            self.nyc_words[text] = pm
+            self.nyc_words[key] = pm
         return pm
 
     def _nyc(self, p, now, w, h):
@@ -1095,7 +1102,7 @@ class LyricsWindow(QWidget):
             a = min(1.0, d / 0.06) if d < 0.15 else max(0.0, 1 - (d - 0.15) / 0.14)
             p.save()
             p.setCompositionMode(QPainter.CompositionMode_Difference)
-            p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * (0.6 if light else a))))
+            p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * a * (0.6 if light else 1.0))))  # con rampa
             p.restore()
 
     def _nyc_signs(self, p, w, h, snap):

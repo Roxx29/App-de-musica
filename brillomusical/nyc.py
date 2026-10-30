@@ -94,7 +94,8 @@ def camera(pos, starts, rects, t_next, w, h):
         cam = _mix(cam, frame(rects[:j + 1], w, h), 1 - (1 - t) ** 3)
     others = 1.0
     if t_next is not None and k == len(rects) - 1 and len(rects) > 1:
-        z0 = max(starts[-1] + ZOOM_MIN, t_next - ZOOM_LEAD)
+        # siempre hay zoom, aunque la última palabra llegue justo antes de la línea siguiente (rap)
+        z0 = max(starts[-1], min(max(starts[-1] + ZOOM_MIN, t_next - ZOOM_LEAD), t_next - 0.08))
         if pos >= z0 and t_next > z0:
             f = min(1.0, (pos - z0) / (t_next - z0))
             cam = _mix(cam, frame(rects[-1:], w, h), 4 * f ** 3 if f < 0.5 else 1 - (-2 * f + 2) ** 3 / 2)
