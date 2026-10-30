@@ -23,3 +23,14 @@ Las ideas 6, 7 y 8 (opción A) se hicieron en la v9, como prototipo.
 6. **Carrusel centrado en la canción actual**: la que suena en el medio, lo ya escuchado arriba y lo que viene (cola/playlist) abajo.
 7. **Ver la playlist / cola**: Windows (SMTC) no la da. Hace falta YouTube Music integrado en la app o una extensión del navegador.
 8. **No tener YouTube Music abierto aparte, buscar canciones desde la app**. Opciones: A) YouTube Music dentro de la app con un navegador integrado (QtWebEngine: +150–200 MB; riesgo de que Google bloquee el inicio de sesión, hay que probarlo); B) extensión de Chrome/Edge que habla con la app (pestaña de fondo); C) descargar el audio: descartada (condiciones de YouTube).
+
+## 2026-10-30 (Latido distinto y modo nuevo)
+
+9. **Latido distinto de Constelación** (propuestas de los agentes; sin decidir). Base común: quitar a Latido las estrellas, la nebulosa y la portada difuminada.
+   - **Pulso** (recomendada): fondo de color liso de la portada que se aclara con cada golpe; letra blanca gigante, gruesa y en mayúsculas, abajo a la izquierda; la palabra que suena crece con el golpe.
+   - **Onda**: fondo negro mate y anillos del color de la portada que salen del centro con cada golpe (varios en drops y estribillos).
+   - **Pulso + Onda**: la mezcla de las dos (recomendada por el Capitán).
+   - **Ecualizador**: barras del color de la portada abajo y la letra saltando encima.
+   - **Escenario**: rejilla en perspectiva y láseres que destellan con los golpes.
+   - **Póster**: se aparta para un modo propio (idea 10).
+10. **Modo nuevo "Nueva York"** (del usuario, a partir de Póster): blanco y negro; las palabras se van juntando unas con otras en distintas direcciones (horizontal y vertical girada 90°, de distintos tamaños, como un crucigrama tipográfico), con placas negras de esquinas redondeadas detrás como en la foto de referencia (MAYAMI / CORRER / GUSTAR); cuando se juntan varias, zoom a la última, que pasa a ser el inicio del siguiente bloque. Fondo que combine con las letras en negro.
