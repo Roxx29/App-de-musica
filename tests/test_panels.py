@@ -30,6 +30,12 @@ class TestPanels(unittest.TestCase):
         self.assertIsNone(panels.item_at(5, lay))
         self.assertEqual(panels.strip_layout(0, None, 0, 720), [])
 
+    def test_actual_en_el_medio(self):
+        lay = panels.strip_layout(7, 3, 0.35, 900, center=3)
+        self.assertAlmostEqual(lay[3][0], 450)
+        lay = panels.strip_layout(4, 0, 0.35, 900, center=0)  # sin nada arriba: no se sale por arriba
+        self.assertGreaterEqual(lay[0][0] - lay[0][1] / 2, panels.STRIP_TOP - 1e-6)
+
     def test_historial(self):
         hist = history.History(limit=3)
         for k in ("a", "b", "c", "b", "d"):

@@ -18,6 +18,7 @@ STRIP_R, THUMB, BIG, GAP = 16.0, 56.0, 160.0, 12.0
 STRIP_TOP, STRIP_BOTTOM = 64.0, 24.0  # debajo de los avisos
 MAX_ITEMS = 7
 SHOW_T, HOVER_T, LINGER = 0.18, 0.22, 0.6
+HOME = 0.35  # la que suena, sin ratón encima: algo más grande que las demás
 RPM = 200.0  # 33⅓ rpm en grados por segundo
 
 
@@ -45,8 +46,11 @@ def button_at(x, y, h):
     return min(len(BUTTONS) - 1, int((y - py - 6) // BTN))
 
 
-def strip_layout(n, focus, amount, h):
-    """[(y del centro, lado)] de n miniaturas; `focus` (índice, puede ser decimal) crece con `amount` 0..1."""
+def strip_layout(n, focus, amount, h, center=None):
+    """[(y del centro, lado)] de n miniaturas; `focus` (índice, puede ser decimal) crece con `amount` 0..1.
+
+    center: índice que se coloca a media altura (la canción que suena), sin salirse de la ventana.
+    """
     if n <= 0:
         return []
     # lupa: caída gaussiana (σ = 0,6 → la vecina ~80 px)
@@ -59,6 +63,10 @@ def strip_layout(n, focus, amount, h):
     for s in sizes:
         out.append((y + s * k / 2, s * k))
         y += s * k + GAP * k
+    if center is not None and 0 <= center < n:
+        top, bottom = out[0][0] - out[0][1] / 2, out[-1][0] + out[-1][1] / 2
+        shift = max(STRIP_TOP - top, min(h - STRIP_BOTTOM - bottom, h / 2 - out[center][0]))
+        out = [(cy + shift, s) for cy, s in out]
     return out
 
 
@@ -81,6 +89,7 @@ class Panels:
         self.press_t, self.press_btn = -1e9, None
         self.item = None  # índice bajo el ratón en el carrusel
         self.focus, self.amount = None, 0.0  # lupa animada
+        self.home = None  # índice de la que suena
         self.n = 0
         self.layout = []
         self.last = None
@@ -120,11 +129,12 @@ class Panels:
         want_r = 1.0 if (self.near_r or now < self.hint_until) and self.n else 0.0
         return (self.left != want_l or self.right != want_r or now < self.hint_until or now - self.press_t < 0.25
                 or (self.item is not None and self.right > 0 and self.animate)  # la ampliada se anima (no en Ligera)
-                or abs(self.amount - (1.0 if self.item is not None else 0.0)) > 1e-3
+                or abs(self.amount - (1.0 if self.item is not None else HOME if self.home is not None else 0.0)) > 1e-3
                 or (not self.near_l and self.leave_l is not None and self.left > 0)
                 or (not self.near_r and self.leave_r is not None and self.right > 0))
 
-    def update(self, now, h, n):
+    def update(self, now, h, n, home=None):
+        """home: la que suena; sin ratón encima queda algo más grande (la lupa vuelve a ella)."""
         dt = 0.0 if self.last is None else min(0.1, now - self.last)
         self.last, self.n = now, n
         hint = now < self.hint_until
@@ -135,19 +145,22 @@ class Panels:
         self.right = _approach(self.right, 1.0 if stay_r else 0.0, dt, SHOW_T)
         if self.item is not None and self.item >= n:
             self.item = None
-        if self.item is not None:
-            self.focus = self.item if self.focus is None else self.focus + (self.item - self.focus) * min(1.0, dt / 0.09)
-        self.amount = _approach(self.amount, 1.0 if self.item is not None else 0.0, dt, HOVER_T)
+        target = self.item if self.item is not None else home
+        if target is not None:
+            self.focus = target if self.focus is None else self.focus + (target - self.focus) * min(1.0, dt / 0.09)
+        self.amount = _approach(self.amount, 1.0 if self.item is not None else HOME if home is not None else 0.0,
+                                dt, HOVER_T)
         if self.amount == 0:
             self.focus = None
-        self.layout = strip_layout(min(n, MAX_ITEMS), self.focus, _ease(self.amount), h)
+        self.layout = strip_layout(min(n, MAX_ITEMS), self.focus, _ease(self.amount), h, home)
 
     # --- dibujo ---
     def draw(self, p, w, h, now, ctx):
         """ctx: dict con playing, rgb, paper (tema claro), style, items, thumb(it, lado), label(texto, px, bold),
         beat (envolvente 0..1), light (calidad Ligera)."""
         self.animate = not ctx["light"]
-        self.update(now, h, min(len(ctx["items"]), MAX_ITEMS))
+        self.home = next((i for i, it in enumerate(ctx["items"]) if it.get("kind") == "now"), None)
+        self.update(now, h, min(len(ctx["items"]), MAX_ITEMS), self.home)
         if self.left > 0:
             self._controls(p, h, now, ctx)
         if self.right > 0 and self.layout:
@@ -203,7 +216,14 @@ class Panels:
             if i == self.item and s > THUMB + 20:
                 hovered = (it, rect)
                 continue
+            if it.get("kind") == "past":  # lo ya escuchado, más tenue
+                p.setOpacity(e * 0.55)
             self._thumb(p, it, rect, ctx)
+            p.setOpacity(e)
+            if it.get("kind") == "now":  # aro del color de la portada: "suena ahora"
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(QColor(*ctx["rgb"]), 2))
+                p.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 0.06 * s + 3, 0.06 * s + 3)
         if hovered:  # la ampliada encima de las demás, con su vista según el estilo
             it, rect = hovered
             f = max(0.0, min(1.0, (rect.width() - THUMB) / (BIG - THUMB)))
@@ -229,7 +249,8 @@ class Panels:
 
     def _label(self, p, it, rect, ctx):
         title = ctx["label"](it["title"], 14, True)
-        artist = ctx["label"](it["artist"], 12, False)
+        tag = {"now": "Suena ahora · ", "next": "Sigue · "}.get(it.get("kind"), "")
+        artist = ctx["label"](tag + it["artist"], 12, False)
         dpr = title.devicePixelRatio()
         tw = max(title.width(), artist.width()) / dpr
         th = (title.height() + artist.height()) / dpr

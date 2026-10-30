@@ -18,6 +18,8 @@ Las ideas 1 a 4 se hicieron en la v8 (ver `docs/decisiones.md`). Queda la 5.
 
 ## 2026-10-30
 
+Las ideas 6, 7 y 8 (opción A) se hicieron en la v9, como prototipo.
+
 6. **Carrusel centrado en la canción actual**: la que suena en el medio, lo ya escuchado arriba y lo que viene (cola/playlist) abajo.
 7. **Ver la playlist / cola**: Windows (SMTC) no la da. Hace falta YouTube Music integrado en la app o una extensión del navegador.
 8. **No tener YouTube Music abierto aparte, buscar canciones desde la app**. Opciones: A) YouTube Music dentro de la app con un navegador integrado (QtWebEngine: +150–200 MB; riesgo de que Google bloquee el inicio de sesión, hay que probarlo); B) extensión de Chrome/Edge que habla con la app (pestaña de fondo); C) descargar el audio: descartada (condiciones de YouTube).

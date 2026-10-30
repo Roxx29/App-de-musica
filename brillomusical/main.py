@@ -9,11 +9,11 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import QLockFile, QObject, QSettings, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QIcon
+from PySide6.QtCore import QCoreApplication, QLockFile, QObject, QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import artwork, audio, backdrop, beat, color, cover, kinetic, lyrics, quality, transitions
+from . import artwork, audio, backdrop, beat, color, cover, history, kinetic, lyrics, quality, transitions, ytm
 from .color import FALLBACK
 from .constellation import HELP, SEARCHING, LyricsWindow
 from .glow import Glow
@@ -73,7 +73,15 @@ class Controller(QObject):
         self.art_requested = False
         self.debounce = QTimer(self, singleShot=True, interval=DEBOUNCE_MS, timeout=self._fetch)
         self.watcher = MediaWatcher()
-        self.watcher.snapshot.connect(self._on_snapshot)
+        # dos fuentes: el navegador (controles multimedia de Windows) y YouTube Music integrado
+        self.sources, self.active = {"ext": None, "ytm": None}, "ext"
+        self.watcher.snapshot.connect(lambda s: self._source("ext", s))
+        self.ytm = ytm.Ytm(DATA)
+        self.ytm.snapshot.connect(lambda s: self._source("ytm", s))
+        self.ytm_queue = []
+        self.ytm.queue.connect(self._on_queue)
+        self.window.open_ytm.connect(self.ytm.show)
+        self.window.song.connect(self._song)
         self.window.control.connect(self._control)
         self.genre_ready.connect(self._on_genre)
         self.seek = (None, 0.0)  # (destino, hora) del último ±10 s: dos seguidos suman aunque SMTC no haya respondido
@@ -103,6 +111,7 @@ class Controller(QObject):
         f = show.font()
         f.setBold(True)
         show.setFont(f)
+        menu.addAction("Abrir YouTube Music", self.ytm.show)
         menu.addAction("Pantalla completa", self._fullscreen)
         menu.addSeparator()
         toggle = QAction("Brillo en los bordes", menu, checkable=True, checked=self.glow.enabled)
@@ -214,6 +223,29 @@ class Controller(QObject):
             self.window.set_auto_style(kinetic.style_for(genre), genre)
             self._update_audio(self.window.snap)  # Latido y Cinta necesitan el medidor; Constelación no
 
+    def _source(self, name, snap):
+        """Llega una foto de una fuente; manda la integrada salvo que solo suene el navegador."""
+        self.sources[name] = snap
+        self.active, chosen = ytm.choose(self.sources["ext"], self.sources["ytm"], self.active)
+        self.window.set_queue(self.ytm_queue if self.active == "ytm" else [])  # la cola solo es de la integrada
+        self._on_snapshot(chosen)
+
+    def _on_queue(self, queue):
+        self.ytm_queue = queue
+        self.window.set_queue(queue if self.active == "ytm" else [])
+
+    def _song(self, entry):
+        """Clic en el carrusel: de la cola se reproduce; las anteriores se buscan en YouTube Music."""
+        kind, it, ref = entry
+        if kind == "next":
+            self.ytm.command("queue", ref)
+        elif kind == "now" and self.active == "ytm":
+            self.ytm.show()
+        elif self.active == "ytm":
+            self.ytm.search(it["title"], it["artist"])
+        elif kind != "now":
+            QDesktopServices.openUrl(QUrl(history.search_url(it["title"], it["artist"])))
+
     def _control(self, action):
         """Controles de YouTube Music: los manda a la sesión del navegador que se ve en pantalla."""
         snap = self.window.snap
@@ -226,9 +258,12 @@ class Controller(QObject):
             end = snap["duration"] - 1 if snap["duration"] else target
             target = max(0.0, min(target, end))
             self.seek = (target, time.monotonic())
-            self.watcher.command("seek", target)
+            self._send("seek", target)
         elif not (action == "next" and snap and snap["ad"]):  # en un anuncio YouTube no deja saltar
-            self.watcher.command(action)
+            self._send(action)
+
+    def _send(self, name, arg=None):
+        (self.ytm if self.active == "ytm" else self.watcher).command(name, arg)
 
     def _fullscreen(self):
         self._open()
@@ -413,6 +448,7 @@ class Controller(QObject):
         if self.window.isVisible():
             self.window.close()  # guarda la posición
         self.tray.hide()
+        self.ytm.quit()
         QApplication.quit()
 
     def _on_snapshot(self, snap):
@@ -491,6 +527,7 @@ def main():
                                                        else 512_000, backupCount=1, encoding="utf-8")])
     logging.getLogger("PIL").setLevel(logging.INFO)  # su DEBUG solo ensucia el log
     sys.excepthook = lambda *exc: log.critical("Error no controlado", exc_info=exc)
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)  # YouTube Music integrado se carga más tarde
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("BrilloMusical")

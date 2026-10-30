@@ -9,7 +9,8 @@ import os
 import time
 from ctypes import HRESULT, POINTER, byref, c_float, c_uint, c_void_p, wintypes
 
-BROWSERS = ("opera.exe", "opera_gx.exe", "chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe", "firefox.exe")
+BROWSERS = ("opera.exe", "opera_gx.exe", "chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe", "firefox.exe",
+            "qtwebengineprocess.exe")  # el último: YouTube Music integrado
 REENUM = 3.0  # segundos entre búsquedas de sesiones nuevas
 
 

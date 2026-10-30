@@ -11,7 +11,8 @@ from PySide6.QtGui import QColor, QFont, QPainterPath, QPen
 
 # (acción, icono de Segoe MDL2 Assets, nombre)
 ITEMS = (("style", "", "Estilo"), ("transition", "", "Transición"), ("bg", "", "Fondo"),
-         ("cover", "", "Carátula"), ("quality", "", "Calidad"), ("fullscreen", "", "Pantalla completa"))
+         ("cover", "", "Carátula"), ("quality", "", "Calidad"), ("fullscreen", "", "Pantalla completa"),
+         ("ytm", "\uE8D6", "YouTube Music"))
 CY, BUTTON = 30.0, 16.0  # centro (px desde arriba) y radio del botón
 R_IN, R_OUT = 40.0, 112.0
 ZONE_W, ZONE_H = 130.0, 90.0  # media anchura y altura de la zona que muestra el botón

@@ -29,7 +29,9 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 
 **Controles** (lado izquierdo): acerca el ratón al borde izquierdo de la ventana de la letra. Aparecen anterior, −10 s, reproducir/pausa, +10 s y siguiente, que controlan YouTube Music.
 
-**Sonó antes** (lado derecho): acerca el ratón al borde derecho para ver las canciones que han sonado mientras la app está abierta. Al pasar el ratón por una, se hace grande y se ve según el estilo: una galaxia en Constelación, un vinilo girando en Cinta y un altavoz con ondas en Latido. Con un clic se abre en YouTube Music.
+**YouTube Music integrado** (opcional): en la bandeja, *Abrir YouTube Music*, o en el sector de YouTube Music de la rueda. Abre YouTube Music dentro de BrilloMusical: inicias sesión, buscas canciones y pones tus listas sin abrir el navegador. Si cierras esa ventana, la música sigue sonando y la controlas desde la letra.
+
+**Carrusel** (lado derecho): acerca el ratón al borde derecho. La canción que suena aparece en el medio, con un aro de su color. Arriba están las que ya han sonado y, con YouTube Music integrado, abajo las siguientes de tu lista o cola. Con un clic en una siguiente, se reproduce. Al pasar el ratón por una, se hace grande y se ve según el estilo: una galaxia en Constelación, un vinilo girando en Cinta y un altavoz con ondas en Latido. Con un clic se abre en YouTube Music.
 
 **Bandeja**: haz clic derecho en la estrella para ver todas las opciones, también las del efecto del borde y la sincronización de la letra.
 
@@ -57,11 +59,11 @@ En *Calidad*, el modo **Automática** mide lo que le cuesta a tu equipo mover la
 ## Requisitos
 
 - Windows 10 u 11.
-- YouTube Music en un navegador basado en Chromium (Chrome, Edge, Opera, Brave…).
+- YouTube Music en un navegador basado en Chromium (Chrome, Edge, Opera, Brave…), o el YouTube Music integrado de la app.
 
 ## Privacidad
 
-BrilloMusical lee la canción que suena desde los controles multimedia de Windows. Para buscar la letra y la portada HD envía **solo el título y el artista** a LRCLIB, iTunes y Deezer. Puedes desactivar la portada HD en *Carátula → Portada HD*. El estilo *Automático (según el género)* también pregunta el género a iTunes con el título y el artista. Al hacer clic en una canción de *Sonó antes* se abre en el navegador una búsqueda de YouTube Music con su título y artista. La lista de *Sonó antes* no se guarda: se borra al cerrar la app. La app no guarda ni envía nada más. La caché está en `%LOCALAPPDATA%\BrilloMusical`.
+BrilloMusical lee la canción que suena desde los controles multimedia de Windows. Para buscar la letra y la portada HD envía **solo el título y el artista** a LRCLIB, iTunes y Deezer. Puedes desactivar la portada HD en *Carátula → Portada HD*. El estilo *Automático (según el género)* también pregunta el género a iTunes con el título y el artista. Al hacer clic en una canción de *Sonó antes* se abre en el navegador una búsqueda de YouTube Music con su título y artista. La lista de canciones del carrusel no se guarda: se borra al cerrar la app. Con *YouTube Music integrado*, tu sesión de Google (cookies) queda solo en este PC, en `%LOCALAPPDATA%\BrilloMusical\web`. BrilloMusical no ve tu contraseña. Para cerrar sesión, sal desde YouTube Music o borra esa carpeta. La app no guarda ni envía nada más. La caché está en `%LOCALAPPDATA%\BrilloMusical`.
 
 ## Problemas comunes
 
@@ -69,6 +71,7 @@ BrilloMusical lee la canción que suena desde los controles multimedia de Window
 - **La animación va a tirones**: elige *Calidad → Ligera* en la rueda o en la bandeja.
 - **La letra va adelantada o atrasada**: usa ← / → en la ventana de la letra, o *Sincronizar letra* en la bandeja.
 - **No encuentro cómo salir de pantalla completa**: pulsa **Esc** o haz doble clic.
+- **Google dice que el navegador no es seguro** al iniciar sesión en YouTube Music integrado: usa YouTube Music en Chrome o Edge. BrilloMusical lo detecta igual.
 - **El .exe no arranca**: abre el que está en `dist\BrilloMusical\`, no el de `build\`.
 
 ## Para desarrolladores

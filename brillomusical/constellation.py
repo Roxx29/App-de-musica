@@ -7,15 +7,17 @@ import bisect
 import ctypes
 import math
 import random
+import threading
 import time
 import zlib
 from collections import OrderedDict
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontInfo, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QImage, QFontInfo, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from . import backdrop, cover, effects, history, kinetic, layout, lyrics, media, panels, quality, ribbon, transitions, wheel
+from . import (backdrop, cover, effects, history, kinetic, layout, lyrics, media, panels, quality, ribbon, transitions,
+               wheel, ytm)
 from .color import FALLBACK
 
 # tamaños en fracción de la altura de la ventana: (estrella, texto)
@@ -62,6 +64,8 @@ class LyricsWindow(QWidget):
     cover_changed = Signal(str)  # C: siguiente posición de la carátula
     transition_changed = Signal(str)  # T: siguiente transición
     control = Signal(str)  # play / next / prev / back / fwd hacia YouTube Music
+    song = Signal(object)  # clic en el carrusel: (tipo, canción, índice en la cola)
+    open_ytm = Signal()  # rueda: abrir YouTube Music integrado
     style_changed = Signal(str)  # L: Automático / Constelación / Latido / Cinta
     quality_changed = Signal(str)
 
@@ -80,6 +84,7 @@ class LyricsWindow(QWidget):
         self.wheel = wheel.Wheel()
         self.panels = panels.Panels()
         self.history = history.History()
+        self.queue, self.qthumbs, self.carousel = [], {}, []  # cola de YouTube Music integrado
         self.wheel_on = self.skip = False
         self.setMouseTracking(True)
         self.cursor_timer = QTimer(self, singleShot=True, interval=CURSOR_HIDE, timeout=self._hide_cursor)
@@ -213,6 +218,41 @@ class LyricsWindow(QWidget):
         self._thumb(key)
         self.update()
 
+    def set_queue(self, queue):
+        self.queue = queue
+
+    def _carousel(self):
+        """Lo escuchado arriba, la que suena en el medio y la cola abajo, listo para pintar."""
+        items = self.history.items
+        out = []
+        playing = items[0] if items and self.snap and not self.snap["ad"] else None  # sin música no hay "suena ahora"
+        for kind, it, ref in history.carousel(items[1:] if playing else items, playing, self.queue):
+            thumb = it.get("thumb") if kind != "next" else self._queue_thumb(it["thumb"])
+            out.append({"title": it["title"], "artist": it["artist"], "thumb": thumb, "kind": kind,
+                        "entry": (kind, it, ref)})
+        self.carousel = out
+        return out
+
+    def _queue_thumb(self, url):
+        """Miniatura de la cola: se baja una vez en un hilo y se convierte aquí (hilo de Qt)."""
+        got = self.qthumbs.get(url)
+        if isinstance(got, bytes):
+            img = QImage.fromData(got)
+            got = self.qthumbs[url] = img if not img.isNull() else None
+        elif url not in self.qthumbs and url.startswith("https://"):
+            self.qthumbs[url] = False  # en camino
+            if len(self.qthumbs) > 100:
+                self.qthumbs.clear()
+
+            def work():
+                try:
+                    self.qthumbs[url] = ytm.fetch(url, 1_000_000)
+                except Exception:
+                    self.qthumbs[url] = None
+
+            threading.Thread(target=work, daemon=True).start()
+        return got or None
+
     def _thumb(self, key):
         """Miniatura de la portada actual para "Sonó antes" (pequeña: no guarda la de 1000 px)."""
         if self.cover.img is not None:
@@ -331,13 +371,15 @@ class LyricsWindow(QWidget):
             self.quality_changed.emit(self.quality.setting)
         elif action == "fullscreen":
             self.toggle_fullscreen()
+        elif action == "ytm":
+            self.open_ytm.emit()
 
     def wheel_value(self, action):
         style = kinetic.STYLE_NAMES[self.style]
         return {"style": f"Automático · {style}" if self.style_setting == "auto" else style, "transition": transitions.SETTING_NAMES[self.trans_setting],
                 "bg": backdrop.NAMES[self.backdrop.setting], "cover": cover.NAMES[self.cover.mode],
                 "quality": quality.NAMES[self.quality.setting],
-                "fullscreen": "salir" if self.isFullScreen() else "activar"}[action]
+                "fullscreen": "salir" if self.isFullScreen() else "activar", "ytm": "abrir"}[action]
 
     KEYS = {Qt.Key_B: "bg", Qt.Key_T: "transition", Qt.Key_C: "cover", Qt.Key_L: "style",
             Qt.Key_F: "fullscreen", Qt.Key_F11: "fullscreen"}
@@ -393,9 +435,8 @@ class LyricsWindow(QWidget):
                 self.cycle(action)
             elif hit and hit[0] == "control":
                 self.control.emit(hit[1])
-            elif hit:  # "Sonó antes": esa canción en YouTube Music, en el navegador
-                it = self.history.before()[hit[1]]
-                QDesktopServices.openUrl(QUrl(history.search_url(it["title"], it["artist"])))
+            elif hit and hit[1] < len(self.carousel):
+                self.song.emit(self.carousel[hit[1]]["entry"])
             self._wheel_frames()
             self.update()
         super().mousePressEvent(e)
@@ -568,7 +609,7 @@ class LyricsWindow(QWidget):
         snap = self.snap
         self.panels.draw(p, self.width(), self.height(), now, {
             "playing": bool(snap) and snap["playing"], "rgb": self.rgb, "paper": self.style == "ribbon",
-            "style": self.style, "items": self.history.before(), "thumb": lambda it, side: it["thumb"],
+            "style": self.style, "items": self._carousel(), "thumb": lambda it, side: it["thumb"],
             "label": lambda t, px, bold: self._text_pixmap(t, px, bold, (255, 255, 255), False),
             "beat": effects.env(now - self.beat_t, 0.04, 0.22), "light": self.quality.light})
         if self.wheel.open > 0:  # la letra se apaga un poco bajo la rueda abierta
