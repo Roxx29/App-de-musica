@@ -15,3 +15,9 @@ Las ideas 1 a 4 se hicieron en la v8 (ver `docs/decisiones.md`). Queda la 5.
 3. **Estilo automático por género**: un modo que detecta el género de la canción y elige el estilo de letra (Constelación / Latido / Cinta). El género puede venir de iTunes (`primaryGenreName`), que la app ya consulta para la portada HD.
 4. **Mejorar Cinta**: además de la cinta 3D, añadir más animaciones a ese estilo (por definir con Animaciones y el agente de vídeo).
 5. Del Gestor de ideas (v7), sin hacer: captura de la estrofa para redes, aviso "Ahora suena", luces Philips Hue, partículas según palabras de la letra, "Tu semana en colores".
+
+## 2026-10-30
+
+6. **Carrusel centrado en la canción actual**: la que suena en el medio, lo ya escuchado arriba y lo que viene (cola/playlist) abajo.
+7. **Ver la playlist / cola**: Windows (SMTC) no la da. Hace falta YouTube Music integrado en la app o una extensión del navegador.
+8. **No tener YouTube Music abierto aparte, buscar canciones desde la app**. Opciones: A) YouTube Music dentro de la app con un navegador integrado (QtWebEngine: +150–200 MB; riesgo de que Google bloquee el inicio de sesión, hay que probarlo); B) extensión de Chrome/Edge que habla con la app (pestaña de fondo); C) descargar el audio: descartada (condiciones de YouTube).
