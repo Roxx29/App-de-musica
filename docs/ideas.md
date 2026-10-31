@@ -48,3 +48,7 @@ Hecha en la v12 (todas las ideas). También la opción B de la idea 8 (extensió
     - **Tocadiscos**: el aro de arriba gira como un vinilo (33⅓ o 45 rpm según la intensidad) con una aguja que marca la posición de la canción.
     - **Diafragma de cristal**: el aro se deforma en ondas al ritmo.
     - Combinación recomendada: cono en los dos, polvo en el de abajo, Chladni en estribillos y el de arriba como tocadiscos.
+
+## 2026-10-31 (modo Loco)
+
+12. **Modo Loco**: un estilo más que va saltando entre Constelación, Latido, Cinta y Nueva York según la música (drops, inicio de estribillo, cambios de estrofa; más a menudo en canciones intensas), con transiciones muy fluidas de formas: iris que se transforma (círculo → estrella → hexágono), cristal roto, líquido que crece con la energía, remolino que se hunde y persiana o barrido inclinado al ritmo. Se dibujan los dos temas a la vez durante la transición (< 1 s) y se mezclan con la forma animada; en Ligera, transiciones más simples. No es viable que cada elemento se transforme en el del otro tema (dibujan cosas distintas): la transformación es de la imagen entera.
