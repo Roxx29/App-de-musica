@@ -320,6 +320,7 @@ class LyricsWindow(QWidget):
     def _apply_style(self, style):
         self.style = style
         self.nyc_words.clear()  # pixmaps grandes de Nueva York: fuera al cambiar de estilo
+        self.nyc_sky = None
         # al volver a Constelación no hay transición desde una estrofa vieja
         self.shown, self.last_items, self.old_items, self.leaving_now = None, [], [], []
         self.update()
@@ -687,7 +688,7 @@ class LyricsWindow(QWidget):
                                                              (255, 255, 255), False))
             p.setOpacity(1.0)
         if not snap:
-            return self._message(p, "Pon algo en YouTube Music ♪")
+            return self._message(p, "Pon música en tu reproductor ♪")
         if snap["ad"]:
             return self._message(p, "Anuncio · la música vuelve enseguida")
         if self.style == "kinetic" and self.lines:
@@ -788,7 +789,7 @@ class LyricsWindow(QWidget):
         p.fillRect(self.rect(), QColor(*ribbon.PAPER))
         snap = self.snap
         if not snap:
-            return self._message(p, "Pon algo en YouTube Music ♪", rgb=ribbon.INK)
+            return self._message(p, "Pon música en tu reproductor ♪", rgb=ribbon.INK)
         if snap["ad"]:
             return self._message(p, "Anuncio · la música vuelve enseguida", rgb=ribbon.INK)
         pos, light = self.position(), self.quality.light
@@ -951,13 +952,15 @@ class LyricsWindow(QWidget):
             else:
                 ws.insert(0, title)
             starts.insert(0, min(self.lines[i][0], starts[0]) - 1e-3)  # antes que la primera, siempre
-        t_next = self.lines[tl[k + 1]][0] if k + 1 < len(tl) else None
-        durs = [min(1.5, b - a) for a, b in zip(starts, starts[1:] + [t_next or starts[-1] + 1.0])]
+        # la siguiente línea empieza con su primera palabra si viene antes que su marca (LRC con tiempos por palabra)
+        t_next = (min(self.lines[tl[k + 1]][0], lyrics.word_times(self.lines, tl[k + 1])[0]) - 1e-3
+                  if k + 1 < len(tl) else None)
+        durs = [max(0.0, min(1.5, b - a)) for a, b in zip(starts, starts[1:] + [t_next or starts[-1] + 1.0])]
         info = [(aspect(x), d, len(x)) for x, d in zip(ws, durs)]
         first = None
         if k > 0:  # mismo alto que tenía al final de la línea anterior: el paso enlaza sin salto
             prev_last = lyrics.word_times(self.lines, tl[k - 1])[-1]
-            first = nyc.size(len(ws[0]), min(1.5, self.lines[tl[k]][0] - prev_last)) * nyc.HERO
+            first = nyc.size(len(ws[0]), max(0.0, min(1.5, starts[0] - prev_last))) * nyc.HERO
         rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
         nxt = " ".join(lyrics.words(self.lines[tl[k + 1]][1])) if k + 1 < len(tl) else ""
         data = (ws, starts, rects, t_next, starts[0] + 1e-3, key[0], nxt)
@@ -983,7 +986,8 @@ class LyricsWindow(QWidget):
         """Silueta de rascacielos (una vez por tamaño) y sus ventanas: [(x, y, ancho, alto)]."""
         if self.nyc_sky is None or self.nyc_sky[0] != (w, h):
             rnd = random.Random(11)
-            pm = QPixmap(w, h)
+            top0 = int(0.45 * h)  # solo la franja de abajo: menos memoria y menos píxeles por fotograma
+            pm = QPixmap(w, h - top0)
             pm.fill(Qt.transparent)
             q = QPainter(pm)
             band = NYC_BAND * h
@@ -992,9 +996,9 @@ class LyricsWindow(QWidget):
                 bw = rnd.uniform(0.04, 0.11) * w
                 bh = rnd.uniform(0.10, 0.30) * h * (1.4 if rnd.random() < 0.12 else 1.0)  # alguna torre
                 top = h - band - bh
-                q.fillRect(QRectF(x, top, bw - 2, bh), QColor(3, 3, 4))
+                q.fillRect(QRectF(x, top - top0, bw - 2, bh), QColor(3, 3, 4))
                 if bh > 0.24 * h:  # aguja
-                    q.fillRect(QRectF(x + bw / 2 - 2, top - 0.05 * h, 3, 0.05 * h), QColor(3, 3, 4))
+                    q.fillRect(QRectF(x + bw / 2 - 2, top - top0 - 0.05 * h, 3, 0.05 * h), QColor(3, 3, 4))
                 ww, wh = max(3.0, 0.006 * w), max(4.0, 0.009 * h)
                 cols, rows = int((bw - 8) / (ww * 2.2)), int((bh - 8) / (wh * 2.2))
                 for cx in range(cols):
@@ -1002,7 +1006,7 @@ class LyricsWindow(QWidget):
                         wins.append((x + 6 + cx * ww * 2.2, top + 6 + cy * wh * 2.2, ww, wh))
                 x += bw
             q.end()
-            self.nyc_sky = ((w, h), pm, wins)
+            self.nyc_sky = ((w, h), pm, wins, top0)
         return self.nyc_sky
 
     def _nyc_bg(self, p, w, h, now, pos, cam):
@@ -1054,8 +1058,8 @@ class LyricsWindow(QWidget):
                 grad.setColorAt(1, QColor(20, 20, 22))
                 p.fillRect(self.rect(), grad)
             # rascacielos al fondo: con cada golpe se encienden dos ventanas y se apagan en 1,5 s
-            _, sky, wins = self._nyc_skyline(w, h)
-            p.drawPixmap(0, 0, sky)
+            _, sky, wins, top0 = self._nyc_skyline(w, h)
+            p.drawPixmap(0, top0, sky)
             if wins:
                 for i, wn in enumerate(wins[::23]):  # unas pocas siempre encendidas
                     p.fillRect(QRectF(*wn), QColor(255, 214, 120, 28 + (i * 37) % 30))
@@ -1115,7 +1119,7 @@ class LyricsWindow(QWidget):
         snap = self.snap
         if not snap or snap["ad"]:
             self._nyc_bg(p, w, h, now, 0.0, (0, 0, 1))
-            return self._message(p, "Pon algo en YouTube Music ♪" if not snap else "Anuncio · la música vuelve enseguida",
+            return self._message(p, "Pon música en tu reproductor ♪" if not snap else "Anuncio · la música vuelve enseguida",
                                  rgb=(255, 255, 255))
         pos, light = self.position(), self.quality.light
         ref = 0.3 * h  # tamaño al que se dibuja cada palabra (luego se escala con la cámara)
@@ -1124,7 +1128,8 @@ class LyricsWindow(QWidget):
         view = h * (1 - NYC_BAND)  # la cámara encuadra por encima de la banda de estación
         cx, cy, sc, others = nyc.camera(pos, starts, rects, t_next, w, view)
         end = t_next if t_next is not None else line_start + 4.0
-        sc *= 1 + 0.04 * min(1.0, max(0.0, (pos - line_start) / max(0.1, end - line_start)))  # acercamiento lento
+        # acercamiento lento que vuelve a 1 al acabar la línea (el paso a la siguiente empieza sin salto)
+        sc *= 1 + 0.04 * math.sin(math.pi * min(1.0, max(0.0, (pos - line_start) / max(0.1, end - line_start))))
         if not light:
             cx += math.sin(pos * 0.23) * 0.006 * w / sc  # deriva
         m = nyc.dive(pos, line_start, t_next)

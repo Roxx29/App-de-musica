@@ -15,6 +15,7 @@ from winrt.windows.storage.streams import DataReader
 
 from . import color, lyrics
 
+BROWSERS = ("chrome", "msedge", "brave", "opera", "vivaldi", "308046b0af4a39cb", "_crx_")  # 308046… = Firefox
 PLAYING = 4
 POLL = 0.5
 GONE_AFTER = 5.0  # segundos sin sesión antes de avisar "sin música"
@@ -42,7 +43,7 @@ class MediaWatcher(QObject):
         self._anchor = {}  # app -> (posición, stamp) de la última foto
         self._last_seen = 0.0
         self._stop = threading.Event()
-        self._loop = self._session = None  # para mandar órdenes a la sesión que se ve en pantalla
+        self._loop = self._session = self._sid = None  # para mandar órdenes a la sesión que se ve en pantalla
         self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name="smtc")
         self._thread.start()
 
@@ -103,8 +104,10 @@ class MediaWatcher(QObject):
         sessions = []
         for s in manager.get_sessions():
             try:
-                # cualquier app que publique lo que suena (navegador, Spotify, Apple Music, VLC…); primero la que suena
-                sessions.append((s.get_playback_info().playback_status != PLAYING, s))
+                # cualquier app que publique lo que suena (navegador, Spotify, VLC…): primero la que suena y, entre
+                # las que suenan, la que ya se seguía (una pausa entre canciones no salta a otro reproductor)
+                sessions.append(((s.get_playback_info().playback_status != PLAYING,
+                                  s.source_app_user_model_id != self._sid), s))
             except Exception:
                 log.debug("Sesión no disponible", exc_info=True)  # p.ej. pestaña recién cerrada
         for _, s in sorted(sessions, key=lambda x: x[0]):
@@ -114,7 +117,7 @@ class MediaWatcher(QObject):
                 log.warning("Sesión con error, se ignora", exc_info=True)
                 continue
             if snap:
-                self._session = s
+                self._session, self._sid = s, s.source_app_user_model_id
                 return snap
         self._session = None
         return None
@@ -148,7 +151,9 @@ class MediaWatcher(QObject):
             except Exception:
                 log.exception("No se pudo leer la portada")
         pal, _ = art["art"]
-        ad = lyrics.is_ad(props.title, props.artist, props.album_title, duration)
+        # solo hay anuncios de YouTube en el navegador; en VLC o Spotify un archivo sin artista no es un anuncio
+        browser = any(b in session.source_app_user_model_id.lower() for b in BROWSERS)
+        ad = browser and lyrics.is_ad(props.title, props.artist, props.album_title, duration)
         pos = timeline.position.total_seconds()
         stamp = timeline.last_updated_time.timestamp()
         stamp_ok = 0 <= stamp <= time.time()
