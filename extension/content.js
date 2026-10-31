@@ -18,7 +18,9 @@ function read() {
 
 function run(cmd) {
   if (cmd && cmd.name === "queue" && Number.isInteger(cmd.index)) {
-    const q = items()[cmd.index];
+    // por título: si la cola cambió en ese segundo, el índice ya no es el de esa canción
+    const all = items();
+    const q = all.find((it) => cmd.title && text(it, ".song-title") === cmd.title) || (!cmd.title && all[cmd.index]);
     if (q) (q.querySelector("ytmusic-play-button-renderer") || q).click();
   }
 }

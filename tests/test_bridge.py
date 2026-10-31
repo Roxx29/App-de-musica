@@ -36,10 +36,11 @@ class TestBridge(unittest.TestCase):
                                          headers={"Content-Type": "application/json", "Origin": origin})
             with urllib.request.urlopen(req, timeout=3) as r:
                 return json.loads(r.read())
-        with self.assertRaises(urllib.error.HTTPError):  # una web cualquiera no entra
-            post("https://evil.example")
-        self.assertEqual(post("chrome-extension://abc")["commands"], [{"name": "queue", "index": 3}])
-        self.assertEqual(post("chrome-extension://abc")["commands"], [])  # la orden se entrega una vez
+        for origin in ("https://evil.example", "chrome-extension://otra"):  # ni webs ni otras extensiones
+            with self.assertRaises(urllib.error.HTTPError):
+                post(origin)
+        self.assertEqual(post(bridge.EXTENSION)["commands"], [{"name": "queue", "index": 3, "title": ""}])
+        self.assertEqual(post(bridge.EXTENSION)["commands"], [])  # la orden se entrega una vez
         b.stop()
 
 

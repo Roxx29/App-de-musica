@@ -940,10 +940,10 @@ class LyricsWindow(QWidget):
         p.setOpacity(1.0)
 
     def _chladni(self, k):
-        """Figura de Chladni k (n, m distintos), dibujada una vez en 96 px y reutilizada."""
+        """Figura de Chladni k (n, m distintos), dibujada una vez en 64 px y reutilizada."""
         n, m = (2, 3, 4, 5, 6, 3)[k % 6], (2, 3, 2, 3, 4, 4)[k % 6]
         if (n, m) not in self.chladni:
-            size = 96
+            size = 64  # pequeña: se dibuja una vez sin tirón y se amplía suave
             img = QImage(size, size, QImage.Format_ARGB32)
             img.fill(Qt.transparent)
             for y in range(size):
@@ -1043,8 +1043,8 @@ class LyricsWindow(QWidget):
         rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
         nxt = " ".join(lyrics.words(self.lines[tl[k + 1]][1])) if k + 1 < len(tl) else ""
         data = (ws, starts, rects, t_next, starts[0] + 1e-3, key[0], nxt)
-        if self.nyc_cache and self.nyc_cache[1] is self.lines:
-            self.nyc_prev = self.nyc_cache[2]  # el bloque anterior queda detrás, como un fantasma
+        # el bloque anterior queda detrás, como un fantasma (de otra canción, no)
+        self.nyc_prev = self.nyc_cache[2] if self.nyc_cache and self.nyc_cache[1] is self.lines else None
         self.nyc_cache = (key, self.lines, data)
         self.nyc_plates = {}
         for x in [x for x in self.nyc_words if x[0] not in ws]:  # se queda la que pasa al bloque nuevo
@@ -1336,7 +1336,7 @@ class LyricsWindow(QWidget):
         for i in range(50):
             ln = (0.03 + 0.04 * rnd[i]) * h
             y = ((pos * (0.9 + 0.5 * rnd[50 + i]) * h + rnd[i] * h * 3) % (h + ln)) - ln
-            x = rnd[50 + i] * (w + 0.6 * h) - y * dx / dy
+            x = rnd[50 + i] * (w + 0.6 * h) - 0.6 * h + y * dx / dy  # cae en la dirección en que está inclinada
             p.drawLine(QPointF(x, y), QPointF(x + ln * dx, y + ln * dy))
 
     def _nyc_ghost(self, p, w, view, ref):

@@ -265,7 +265,7 @@ class Controller(QObject):
         if kind == "next" and self.active == "ytm":
             self.ytm.command("queue", ref)
         elif kind == "next":
-            self.bridge.command("queue", ref)  # la extensión la pone en la pestaña de YouTube Music
+            self.bridge.command("queue", ref, it["title"])  # la extensión la pone en la pestaña de YouTube Music
         elif kind == "now" and self.active == "ytm":
             self.ytm.show()
         elif self.active == "ytm":

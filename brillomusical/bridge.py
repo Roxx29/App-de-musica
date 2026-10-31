@@ -5,12 +5,15 @@ navegador (cabecera Origin chrome-extension://, que una web no puede falsificar)
 """
 import json
 import logging
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PySide6.QtCore import QObject, Signal
 
 PORT = 38917
+# ID fijo de nuestra extensión (sale de la clave pública "key" de extension/manifest.json): ninguna otra entra
+EXTENSION = "chrome-extension://adojdlfkiohcjpodphaecndmkodipobn"
 MAX_BODY = 256 * 1024
 MAX_ITEMS, MAX_TEXT = 200, 300
 
@@ -36,6 +39,15 @@ def clean(state):
     return {"now": {"title": _text(now.get("title")), "artist": _text(now.get("artist"))}, "queue": out}
 
 
+class _Server(ThreadingHTTPServer):
+    allow_reuse_address = False  # en Windows, con esto otro programa podría compartir el puerto sin error
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):  # Windows: el puerto es solo nuestro
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class Bridge(QObject):
     state = Signal(object)
 
@@ -45,10 +57,16 @@ class Bridge(QObject):
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = 5  # un cliente lento no deja un hilo colgado
+
             def do_POST(self):
-                if self.path != "/state" or not self.headers.get("Origin", "").startswith("chrome-extension://"):
+                if (self.path != "/state" or self.headers.get("Origin", "").rstrip("/") != EXTENSION
+                        or not self.headers.get("Content-Type", "").startswith("application/json")):
                     return self._send(403, {})
-                size = int(self.headers.get("Content-Length") or 0)
+                try:
+                    size = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    size = -1
                 if not 0 < size <= MAX_BODY:
                     return self._send(413, {})
                 try:
@@ -74,16 +92,17 @@ class Bridge(QObject):
                 pass  # sin ruido en el log
 
         try:
-            self.server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+            self.server = _Server(("127.0.0.1", PORT), Handler)
         except OSError:
             log.warning("Puerto %s ocupado: la extensión de Chrome no podrá enviar la cola", PORT)
             self.server = None
             return
         threading.Thread(target=self.server.serve_forever, daemon=True, name="bridge").start()
 
-    def command(self, name, index):
+    def command(self, name, index, title=""):
+        """Orden para la pestaña; lleva el título para que la extensión no reproduzca otra si la cola cambió."""
         with self.lock:
-            self.pending = (self.pending + [{"name": name, "index": int(index)}])[-5:]
+            self.pending = (self.pending + [{"name": name, "index": int(index), "title": title}])[-5:]
 
     def stop(self):
         if self.server:
