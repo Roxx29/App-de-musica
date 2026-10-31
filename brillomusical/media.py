@@ -15,7 +15,6 @@ from winrt.windows.storage.streams import DataReader
 
 from . import color, lyrics
 
-BROWSERS = ("chrome", "msedge", "brave", "opera", "vivaldi", "308046b0af4a39cb", "_crx_")  # 308046… = Firefox
 PLAYING = 4
 POLL = 0.5
 GONE_AFTER = 5.0  # segundos sin sesión antes de avisar "sin música"
@@ -104,8 +103,8 @@ class MediaWatcher(QObject):
         sessions = []
         for s in manager.get_sessions():
             try:
-                if any(b in s.source_app_user_model_id.lower() for b in BROWSERS):
-                    sessions.append((s.get_playback_info().playback_status != PLAYING, s))
+                # cualquier app que publique lo que suena (navegador, Spotify, Apple Music, VLC…); primero la que suena
+                sessions.append((s.get_playback_info().playback_status != PLAYING, s))
             except Exception:
                 log.debug("Sesión no disponible", exc_info=True)  # p.ej. pestaña recién cerrada
         for _, s in sorted(sessions, key=lambda x: x[0]):
@@ -148,11 +147,8 @@ class MediaWatcher(QObject):
                     self._last_hash = digest
             except Exception:
                 log.exception("No se pudo leer la portada")
-        pal, aspect = art["art"]
+        pal, _ = art["art"]
         ad = lyrics.is_ad(props.title, props.artist, props.album_title, duration)
-        # YouTube Music: tiene álbum o portada cuadrada (YouTube normal es 16:9)
-        if not ad and not props.album_title and not (aspect and 0.9 <= aspect <= 1.1):
-            return None
         pos = timeline.position.total_seconds()
         stamp = timeline.last_updated_time.timestamp()
         stamp_ok = 0 <= stamp <= time.time()

@@ -16,6 +16,10 @@ MOVE, ZOOM_MIN, ZOOM_LEAD, FADE = 0.35, 0.3, 0.4, 0.15
 FILL = 0.85  # una palabra sola llena el 85 % del ancho
 ASPECT = 16 / 9
 VERTICAL = 0.35  # probabilidad de girar una palabra que cabe en vertical
+HERO = 1.8  # la última palabra de la línea, la protagonista (unas 3 veces las demás)
+DIVE, DIVE_MAX = 0.35, 8.0  # entre líneas la cámara atraviesa la placa: 0,35 s hasta ×8 y sale igual
+# colores de las líneas del metro de Nueva York: el acento es el más parecido a la portada
+MTA = ((238, 53, 46), (255, 99, 25), (252, 204, 10), (0, 147, 60), (0, 57, 166), (185, 51, 173), (108, 190, 69))
 
 
 def next_bg(b):
@@ -23,8 +27,9 @@ def next_bg(b):
 
 
 def size(letters, dur):
-    """Alto de una palabra: las largas o las que duran más, más grandes."""
-    return max(0.5, min(1.6, 0.55 + 0.08 * letters + 0.5 * dur))
+    """Alto de una palabra en tres escalones, como un cartel: las cortas (me, por, la) pequeñas y finas,
+    el resto medianas según lo que duran; la protagonista (la última) se multiplica después."""
+    return 0.45 if letters <= 3 else min(1.25, 0.85 + 0.25 * min(dur, 1.5))
 
 
 def _free(r, rects):
@@ -49,7 +54,7 @@ def place(words, seed, first=None):
     rnd = random.Random(seed)
     rects, n = [], len(words)
     for i, (asp, dur, letters) in enumerate(words):
-        s = first if i == 0 and first else size(letters, dur) * (1.4 if i == n - 1 and i else 1.0)
+        s = first if i == 0 and first else size(letters, dur) * (HERO if i == n - 1 and i else 1.0)
         if i == 0:
             rects.append((0.0, 0.0, asp * s, s, False))
             continue
@@ -71,6 +76,36 @@ def place(words, seed, first=None):
             spot = (min(r[0] for r in rects), max(r[1] + r[3] for r in rects) + GAP, asp * s, s, False)
         rects.append(spot)
     return rects
+
+
+def mta(rgb):
+    """Color de línea de metro más cercano en tono al de la portada (gris → amarillo, el del taxi)."""
+    r, g, b = (c / 255 for c in rgb)
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx - mn < 0.12:
+        return MTA[2]
+
+    def hue(c):
+        cr, cg, cb = (v / 255 for v in c)
+        a, z = max(cr, cg, cb), min(cr, cg, cb)
+        d = a - z or 1e-9
+        hh = ((cg - cb) / d) % 6 if a == cr else (cb - cr) / d + 2 if a == cg else (cr - cg) / d + 4
+        return hh / 6
+    h0 = hue(rgb)
+    return min(MTA, key=lambda c: min(abs(hue(c) - h0), 1 - abs(hue(c) - h0)))
+
+
+def dive(pos, line_start, t_next):
+    """Multiplicador de zoom del paso entre líneas: entra en la placa antes de t_next y sale del negro al empezar."""
+    m = 1.0
+    if t_next is not None:
+        d = min(DIVE, 0.25 * (t_next - line_start))  # líneas cortas (rap): más corto, no brusco
+        if d > 0 and t_next - d < pos <= t_next:
+            m *= DIVE_MAX ** (((pos - (t_next - d)) / d) ** 3)
+    d = DIVE if t_next is None else min(DIVE, 0.25 * (t_next - line_start))
+    if d > 0 and line_start <= pos < line_start + d:
+        m *= DIVE_MAX ** ((1 - (pos - line_start) / d) ** 3)
+    return m
 
 
 def frame(rects, w, h):

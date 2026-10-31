@@ -20,9 +20,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from . import color, lyrics
 
 URL = "https://music.youtube.com/"
-# sin "QtWebEngine" en el user agent: así YouTube y Google lo tratan como un Chrome normal
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-      "Chrome/142.0.0.0 Safari/537.36")
+UA = "BrilloMusical/1.0"  # solo para descargar portadas y miniaturas
 POLL_MS = 500
 GONE_AFTER = 5.0
 FRESH = 1.0  # tras cambiar de canción, la duración del <video> aún puede ser la anterior
@@ -87,8 +85,9 @@ class Window(QWidget):
         super().__init__()
         self.setWindowTitle("BrilloMusical · YouTube Music")
         self.resize(1100, 760)
-        tip = QLabel("Inicia sesión con tu cuenta de Google para ver tus listas y usar Premium. "
-                     "La sesión se queda en este PC. Si cierras esta ventana, la música sigue sonando.")
+        tip = QLabel("Google no permite iniciar sesión en navegadores integrados en apps: aquí YouTube Music funciona "
+                     "sin cuenta. Para tu Premium y tus listas, usa YouTube Music en Chrome o Edge: BrilloMusical lo "
+                     "detecta igual. Si cierras esta ventana, la música sigue sonando.")
         tip.setWordWrap(True)
         tip.setStyleSheet("padding: 6px 10px; background: #1b1b22; color: #ddd;")
         lay = QVBoxLayout(self)
@@ -133,7 +132,6 @@ class Ytm(QObject):
         profile.setPersistentStoragePath(os.path.join(self.dir, "storage"))
         profile.setCachePath(os.path.join(self.dir, "cache"))
         profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
-        profile.setHttpUserAgent(UA)
         profile.settings().setAttribute(QWebEngineSettings.PlaybackRequiresUserGesture, False)
         view = QWebEngineView()
         self.page = QWebEnginePage(profile, view)

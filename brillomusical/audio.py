@@ -10,7 +10,11 @@ import time
 from ctypes import HRESULT, POINTER, byref, c_float, c_uint, c_void_p, wintypes
 
 BROWSERS = ("opera.exe", "opera_gx.exe", "chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe", "firefox.exe",
-            "qtwebengineprocess.exe")  # el último: YouTube Music integrado
+            "qtwebengineprocess.exe",  # YouTube Music integrado
+            # reproductores de escritorio: cualquier canción, no solo la del navegador
+            "spotify.exe", "applemusic.exe", "itunes.exe", "tidal.exe", "deezer.exe", "amazon music.exe", "qobuz.exe",
+            "vlc.exe", "wmplayer.exe", "microsoft.media.player.exe", "foobar2000.exe", "aimp.exe", "musicbee.exe",
+            "winamp.exe")
 REENUM = 3.0  # segundos entre búsquedas de sesiones nuevas
 
 

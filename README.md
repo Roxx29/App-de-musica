@@ -18,7 +18,7 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
   - **Cinta**: fondo blanco hueso y letra negra condensada que avanza por una cinta en S. La cinta se retuerce en perspectiva y al final se ve su reverso en espejo; la palabra que suena toma el color de la portada. Al empezar cada canción aparece un rótulo con el título escrito letra a letra bajo una franja de flechas. Si no hay letra, la cinta repite el título. Alrededor, dos aros de altavoz laten con la música, una marea de tinta se mueve abajo y en los instrumentales cruza una franja de flechas.
   - **Automático (según el género)**: la app consulta el género de la canción en iTunes y elige el estilo. Hip-hop y rap van con Nueva York; R&B, jazz, indie y alternativa, con Cinta; electrónica, pop, latino, reggaetón y rock, con Latido; clásica, acústica, ambient y bandas sonoras, con Constelación. Si no reconoce el género, usa Constelación.
   - **Latido**: fondo liso del color de la portada que se ilumina con cada golpe, con anillos que salen del centro al ritmo (tres seguidos en las subidas fuertes). La línea que suena va blanca, gigante y en mayúsculas abajo a la izquierda, y la palabra actual crece con el golpe. Los efectos cambian con el ambiente: en las canciones tranquilas la letra sube suave o se rellena tipo karaoke; en las normales, las palabras golpean o se mecen; en las intensas, la letra cae en cascada o entra con impacto.
-  - **Nueva York**: blanco y negro. Cada palabra se engancha a la anterior a la derecha, debajo o en vertical, sobre placas negras de esquinas redondeadas, como un crucigrama. Las largas salen enormes y las cantadas se van apagando a gris. Al terminar cada línea, la cámara hace zoom a la última palabra, que abre el bloque siguiente. En las subidas fuertes la pantalla se invierte un instante. Abajo a la izquierda, un círculo de línea de metro con la inicial del artista y el título en un letrero de calle. Tiene tres fondos (tecla **B**): Asfalto, Portada en blanco y negro y Ciudad (plano de Manhattan).
+  - **Nueva York**: blanco y negro, como un cartel de la ciudad. Las palabras se enganchan a la derecha, debajo o en vertical sobre una sola placa negra, en tres tamaños: las cortas pequeñas, las demás medianas y la última de cada línea, la protagonista, enorme. Cada palabra entra como un sello, la que suena se rellena de gris a blanco y la placa late con el golpe. La cámara se acerca despacio y, al terminar cada línea, atraviesa la placa hacia la siguiente. En los estribillos el borde se enciende como un neón del color de línea de metro más parecido a la portada; en las subidas fuertes la pantalla se invierte y tiembla. Abajo, una banda de estación de metro con la inicial del artista, el título y el verso siguiente. Tres fondos (tecla **B**): Asfalto y Portada en blanco y negro, con rascacielos cuyas ventanas se encienden con los golpes, y Ciudad, un plano de Manhattan con coches que circulan.
 - **Portada de fondo**: difuminada, en movimiento, con efecto Ken Burns o al ritmo. La portada HD sale de iTunes y Deezer.
 - **Carátula**: una tarjeta con título, artista y progreso. Si la canción no tiene letra, o llega un instrumental largo, la carátula se mueve al centro en grande.
 - **Pantalla completa** para dejar la letra puesta en una tele o en un segundo monitor.
@@ -30,7 +30,7 @@ BrilloMusical pinta los bordes de tu pantalla con los colores de la portada de l
 
 **Controles** (lado izquierdo): acerca el ratón al borde izquierdo de la ventana de la letra. Aparecen anterior, −10 s, reproducir/pausa, +10 s y siguiente, que controlan YouTube Music.
 
-**YouTube Music integrado** (opcional): en la bandeja, *Abrir YouTube Music*, o en el sector de YouTube Music de la rueda. Abre YouTube Music dentro de BrilloMusical: inicias sesión, buscas canciones y pones tus listas sin abrir el navegador. Si cierras esa ventana, la música sigue sonando y la controlas desde la letra.
+**YouTube Music integrado** (opcional): en la bandeja, *Abrir YouTube Music*, o en el sector de YouTube Music de la rueda. Abre YouTube Music dentro de BrilloMusical para buscar y poner canciones sin abrir el navegador. Google no permite iniciar sesión en navegadores integrados en apps, así que ahí funciona sin cuenta; para usar tu Premium y tus listas, pon YouTube Music en Chrome o Edge: BrilloMusical lo detecta igual. Si cierras esa ventana, la música sigue sonando.
 
 **Carrusel** (lado derecho): acerca el ratón al borde derecho. La canción que suena aparece en el medio, con un aro de su color. Arriba están las que ya han sonado y, con YouTube Music integrado, abajo las siguientes de tu lista o cola. Con un clic en una siguiente, se reproduce. Al pasar el ratón por una, se hace grande y se ve según el estilo: una galaxia en Constelación, un vinilo girando en Cinta y un altavoz con ondas en Latido. Con un clic se abre en YouTube Music.
 
@@ -60,7 +60,7 @@ En *Calidad*, el modo **Automática** mide lo que le cuesta a tu equipo mover la
 ## Requisitos
 
 - Windows 10 u 11.
-- YouTube Music en un navegador basado en Chromium (Chrome, Edge, Opera, Brave…), o el YouTube Music integrado de la app.
+- Cualquier app que muestre lo que suena en los controles multimedia de Windows: YouTube Music en el navegador, Spotify, Apple Music, Deezer, Tidal, VLC… El ritmo se lee del navegador o de esos reproductores.
 
 ## Privacidad
 
@@ -68,11 +68,11 @@ BrilloMusical lee la canción que suena desde los controles multimedia de Window
 
 ## Problemas comunes
 
-- **No detecta la canción**: comprueba que suena en YouTube Music desde el navegador y que Windows muestra sus controles multimedia (al subir o bajar el volumen con las teclas debería aparecer la canción).
+- **No detecta la canción**: comprueba que Windows muestra los controles multimedia de tu reproductor (al subir o bajar el volumen con las teclas debería aparecer la canción).
 - **La animación va a tirones**: elige *Calidad → Ligera* en la rueda o en la bandeja.
 - **La letra va adelantada o atrasada**: usa ← / → en la ventana de la letra, o *Sincronizar letra* en la bandeja.
 - **No encuentro cómo salir de pantalla completa**: pulsa **Esc** o haz doble clic.
-- **Google dice que el navegador no es seguro** al iniciar sesión en YouTube Music integrado: usa YouTube Music en Chrome o Edge. BrilloMusical lo detecta igual.
+- **Google dice «No puedes acceder» al iniciar sesión en YouTube Music integrado**: es una protección de Google para todos los navegadores dentro de apps. Usa YouTube Music en Chrome o Edge; BrilloMusical lo detecta igual.
 - **El .exe no arranca**: abre el que está en `dist\BrilloMusical\`, no el de `build\`.
 
 ## Para desarrolladores

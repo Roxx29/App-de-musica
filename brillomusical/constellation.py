@@ -13,7 +13,7 @@ import zlib
 from collections import OrderedDict, deque
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QFontInfo, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QImage, QFontInfo, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import (backdrop, cover, effects, history, kinetic, layout, lyrics, media, nyc, panels, quality, ribbon,
@@ -33,6 +33,7 @@ FIRST_TIP = "Acerca el ratón a los bordes: menú arriba, controles a la izquier
 CURSOR_HIDE = 2500  # ms quieto en pantalla completa antes de ocultar el cursor
 # Latido: letra (·alto), mínimo, base de la última fila (·alto), margen izquierdo y anchura máxima (·ancho)
 KIN_SIZE, KIN_MIN, KIN_Y, KIN_X, KIN_W = 0.13, 0.08, 0.90, 0.06, 0.88
+NYC_PAD, NYC_RADIUS, NYC_BAND = 0.16, 0.18, 0.07  # Nueva York: margen y radio de la placa (unidades), banda de estación (·alto)
 
 
 def _out_cubic(t):
@@ -88,6 +89,7 @@ class LyricsWindow(QWidget):
         if self.nyc_bg not in nyc.BGS:
             self.nyc_bg = "asphalt"
         self.nyc_cache, self.nyc_words, self.grain, self.vignette, self.gray = None, {}, None, None, (None, None)
+        self.nyc_plates, self.nyc_sky = {}, None
         self.wheel = wheel.Wheel()
         self.panels = panels.Panels()
         self.history = history.History()
@@ -927,7 +929,8 @@ class LyricsWindow(QWidget):
 
     # --- Nueva York ---
     def _nyc_line(self, pos, fm):
-        """(palabras, inicios, rectángulos, inicio de la siguiente línea) del bloque que toca; una vez por línea."""
+        """Bloque que toca: (palabras, inicios, rectángulos, inicio de la siguiente, inicio de la línea, línea,
+        siguiente verso); una vez por línea."""
         snap = self.snap
         title = snap["title"].upper()
         tl = [i for i, (_, x) in enumerate(self.lines) if any(c.isalnum() for c in x)]  # con texto (no "♪")
@@ -943,57 +946,125 @@ class LyricsWindow(QWidget):
             i = tl[k]
             ws = [x.upper() for x in lyrics.words(self.lines[i][1])]
             starts = lyrics.word_times(self.lines, i)
-            if k > 0:  # la última de la línea anterior abre el bloque (de ahí viene el zoom)
-                j = tl[k - 1]
-                ws.insert(0, lyrics.words(self.lines[j][1])[-1].upper())
-                starts.insert(0, min(self.lines[i][0], starts[0]) - 1e-3)  # antes que la primera, siempre
+            if k > 0:  # la última de la línea anterior abre el bloque (de ahí viene el paso entre líneas)
+                ws.insert(0, lyrics.words(self.lines[tl[k - 1]][1])[-1].upper())
             else:
                 ws.insert(0, title)
-                starts.insert(0, min(0.0, self.lines[i][0] - 1e-3))
+            starts.insert(0, min(self.lines[i][0], starts[0]) - 1e-3)  # antes que la primera, siempre
         t_next = self.lines[tl[k + 1]][0] if k + 1 < len(tl) else None
         durs = [min(1.5, b - a) for a, b in zip(starts, starts[1:] + [t_next or starts[-1] + 1.0])]
         info = [(aspect(x), d, len(x)) for x, d in zip(ws, durs)]
         first = None
-        if k > 0:  # mismo alto que tenía al final de la línea anterior: el zoom enlaza sin salto
-            j = tl[k - 1]
-            prev_last = lyrics.word_times(self.lines, j)[-1]
-            first = nyc.size(len(ws[0]), min(1.5, self.lines[tl[k]][0] - prev_last)) * 1.4
+        if k > 0:  # mismo alto que tenía al final de la línea anterior: el paso enlaza sin salto
+            prev_last = lyrics.word_times(self.lines, tl[k - 1])[-1]
+            first = nyc.size(len(ws[0]), min(1.5, self.lines[tl[k]][0] - prev_last)) * nyc.HERO
         rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
-        data = (ws, starts, rects, t_next)
+        nxt = " ".join(lyrics.words(self.lines[tl[k + 1]][1])) if k + 1 < len(tl) else ""
+        data = (ws, starts, rects, t_next, starts[0] + 1e-3, key[0], nxt)
         self.nyc_cache = (key, self.lines, data)
+        self.nyc_plates = {}
         for x in [x for x in self.nyc_words if x[0] not in ws]:  # se queda la que pasa al bloque nuevo
             del self.nyc_words[x]
         return data
 
-    def _nyc_bg(self, p, w, h, now, cam):
-        """Asfalto, portada en blanco y negro o plano de Manhattan; con grano y viñeta."""
+    def _nyc_plate(self, rects, n):
+        """Una sola placa negra para las n primeras palabras (unión de rectángulos redondeados), en unidades."""
+        if n not in self.nyc_plates:
+            path = QPainterPath()
+            for r in rects[:n]:
+                q = QPainterPath()
+                q.addRoundedRect(QRectF(r[0], r[1], r[2], r[3]).adjusted(-NYC_PAD, -NYC_PAD, NYC_PAD, NYC_PAD),
+                                 NYC_RADIUS, NYC_RADIUS)
+                path = path.united(q)
+            self.nyc_plates[n] = path.simplified()
+        return self.nyc_plates[n]
+
+    def _nyc_skyline(self, w, h):
+        """Silueta de rascacielos (una vez por tamaño) y sus ventanas: [(x, y, ancho, alto)]."""
+        if self.nyc_sky is None or self.nyc_sky[0] != (w, h):
+            rnd = random.Random(11)
+            pm = QPixmap(w, h)
+            pm.fill(Qt.transparent)
+            q = QPainter(pm)
+            band = NYC_BAND * h
+            x, wins = 0.0, []
+            while x < w:
+                bw = rnd.uniform(0.04, 0.11) * w
+                bh = rnd.uniform(0.10, 0.30) * h * (1.4 if rnd.random() < 0.12 else 1.0)  # alguna torre
+                top = h - band - bh
+                q.fillRect(QRectF(x, top, bw - 2, bh), QColor(3, 3, 4))
+                if bh > 0.24 * h:  # aguja
+                    q.fillRect(QRectF(x + bw / 2 - 2, top - 0.05 * h, 3, 0.05 * h), QColor(3, 3, 4))
+                ww, wh = max(3.0, 0.006 * w), max(4.0, 0.009 * h)
+                cols, rows = int((bw - 8) / (ww * 2.2)), int((bh - 8) / (wh * 2.2))
+                for cx in range(cols):
+                    for cy in range(rows):
+                        wins.append((x + 6 + cx * ww * 2.2, top + 6 + cy * wh * 2.2, ww, wh))
+                x += bw
+            q.end()
+            self.nyc_sky = ((w, h), pm, wins)
+        return self.nyc_sky
+
+    def _nyc_bg(self, p, w, h, now, pos, cam):
+        """Asfalto, portada en blanco y negro o plano de Manhattan; vivos con la música."""
         light = self.quality.light
         if self.nyc_bg == "city":
-            p.fillRect(self.rect(), QColor(11, 11, 12))
+            p.fillRect(self.rect(), QColor(24, 24, 26))
             p.save()
             p.translate(w / 2, h / 2)
             p.rotate(29)  # la cuadrícula de Manhattan va girada unos 29°
-            step = 0.045 * h
-            ox = 0.0 if light else -(cam[0] * cam[2] * 0.5) % (5 * step)  # paralaje: la mitad que el texto
-            oy = 0.0 if light else -(cam[1] * cam[2] * 0.5) % (5 * step)
-            reach = math.hypot(w, h) / 2 + 5 * step
-            n = int(reach / step) + 5
-            for k in range(-n, n + 1):
-                avenue = k % 5 == 0
-                p.setPen(QPen(QColor(255, 255, 255, 31 if avenue else 18), 2 if avenue else 1))
-                p.drawLine(QPointF(k * step + ox, -reach), QPointF(k * step + ox, reach))
-                p.drawLine(QPointF(-reach, k * step + oy), QPointF(reach, k * step + oy))
+            k = h / 1080
+            av, st = 300 * k, 64 * k  # avenidas y calles
+            ox = 0.0 if light else -(cam[0] * cam[2] * 0.5) % av  # paralaje: la mitad que el texto
+            oy = 0.0 if light else -(cam[1] * cam[2] * 0.5) % st
+            reach = math.hypot(w, h) / 2 + av
+            p.setPen(QPen(QColor(255, 255, 255, 8), 1))
+            for i in range(-int(reach / st) - 2, int(reach / st) + 3):
+                p.drawLine(QPointF(-reach, i * st + oy), QPointF(reach, i * st + oy))
+            p.setPen(QPen(QColor(255, 255, 255, 20), 2))
+            n_av = int(reach / av) + 2
+            for i in range(-n_av, n_av + 1):
+                p.drawLine(QPointF(i * av + ox, -reach), QPointF(i * av + ox, reach))
+            # luces de coches por las avenidas: blancas en un sentido, rojas en el otro (se paran con la pausa)
+            p.setPen(Qt.NoPen)
+            for c in range(8 if light else 24):
+                lane = (c * 7919) % (2 * n_av + 1) - n_av
+                down = c % 2 == 0
+                y = ((pos * (90 + c % 5 * 25) * k + c * 977) % (2 * reach)) - reach
+                y = y if down else -y
+                p.setBrush(QColor(255, 244, 220, 200) if down else QColor(255, 60, 50, 200))
+                x = lane * av + ox + (-4 if down else 4) * k
+                p.drawEllipse(QPointF(x - 3 * k, y), 2.2 * k, 2.2 * k)
+                p.drawEllipse(QPointF(x + 3 * k, y), 2.2 * k, 2.2 * k)
+                p.setBrush(QColor(255, 244, 220, 40) if down else QColor(255, 60, 50, 40))
+                p.drawRect(QRectF(x - 5 * k, y - (30 * k if down else 0), 10 * k, 30 * k))  # estela
             p.restore()
-        elif self.nyc_bg == "cover" and self.backdrop.tex is not None:
-            img = self.backdrop.tex[0]
-            if self.gray[0] is not img:
-                self.gray = (img, img.convertToFormat(QImage.Format_Grayscale8))
-            x, y, cw, ch = backdrop.cover_rect(w / max(1, h))
-            g = self.gray[1]
-            p.drawImage(QRectF(0, 0, w, h), g, QRectF(x * g.width(), y * g.height(), cw * g.width(), ch * g.height()))
-            p.fillRect(self.rect(), QColor(0, 0, 0, 184))  # oscurecida: las placas negras siguen mandando
         else:
-            p.fillRect(self.rect(), QColor(13, 13, 14))
+            if self.nyc_bg == "cover" and self.backdrop.tex is not None:
+                img = self.backdrop.tex[0]
+                if self.gray[0] is not img:
+                    self.gray = (img, img.convertToFormat(QImage.Format_Grayscale8))
+                x, y, cw, ch = backdrop.cover_rect(w / max(1, h), 1.15)
+                g = self.gray[1]
+                p.drawImage(QRectF(0, 0, w, h), g, QRectF(x * g.width(), y * g.height(), cw * g.width(), ch * g.height()))
+                p.fillRect(self.rect(), QColor(0, 0, 0, 160))  # oscurecida: las placas negras siguen mandando
+            else:
+                grad = QLinearGradient(0, 0, 0, h)
+                grad.setColorAt(0, QColor(40, 40, 43))  # gris asfalto: las placas negras se recortan encima
+                grad.setColorAt(1, QColor(20, 20, 22))
+                p.fillRect(self.rect(), grad)
+            # rascacielos al fondo: con cada golpe se encienden dos ventanas y se apagan en 1,5 s
+            _, sky, wins = self._nyc_skyline(w, h)
+            p.drawPixmap(0, 0, sky)
+            if wins:
+                for i, wn in enumerate(wins[::23]):  # unas pocas siempre encendidas
+                    p.fillRect(QRectF(*wn), QColor(255, 214, 120, 28 + (i * 37) % 30))
+                for t in self.beats:
+                    age = now - t
+                    if 0 <= age < 1.5:
+                        for j in (0, 1):
+                            wn = wins[(int(t * 1000) * 2654435761 + j * 40503) % len(wins)]
+                            p.fillRect(QRectF(*wn), QColor(255, 214, 120, round(220 * (1 - age / 1.5))))
         if not light:  # grano de película, cambia a 12 fps
             if self.grain is None:
                 rnd = random.Random(7)
@@ -1001,20 +1072,19 @@ class LyricsWindow(QWidget):
                 for yy in range(128):
                     for xx in range(128):
                         v = rnd.randint(0, 255)
-                        g.setPixelColor(xx, yy, QColor(v, v, v, 15))
+                        g.setPixelColor(xx, yy, QColor(v, v, v, 8))
                 self.grain = QPixmap.fromImage(g)
             f = int(now * 12)
             p.drawTiledPixmap(QRectF(self.rect()), self.grain, offset=QPointF((f * 37) % 128, (f * 71) % 128))
-        if self.vignette is None or self.vignette.size() != self.size():
-            self.vignette = QPixmap(self.size())
-            self.vignette.fill(Qt.transparent)
-            q = QPainter(self.vignette)
-            grad = QRadialGradient(QPointF(w / 2, h / 2), math.hypot(w, h) / 2)
-            grad.setColorAt(0.55, QColor(0, 0, 0, 0))
-            grad.setColorAt(1, QColor(0, 0, 0, 153))
-            q.fillRect(self.vignette.rect(), grad)
-            q.end()
-        if not light:
+            if self.vignette is None or self.vignette.size() != self.size():
+                self.vignette = QPixmap(self.size())
+                self.vignette.fill(Qt.transparent)
+                q = QPainter(self.vignette)
+                grad = QRadialGradient(QPointF(w / 2, h / 2), math.hypot(w, h) / 2)
+                grad.setColorAt(0.55, QColor(0, 0, 0, 0))
+                grad.setColorAt(1, QColor(0, 0, 0, 90))
+                q.fillRect(self.vignette.rect(), grad)
+                q.end()
             p.drawPixmap(0, 0, self.vignette)
 
     def _nyc_word(self, text, px):
@@ -1041,95 +1111,146 @@ class LyricsWindow(QWidget):
         return pm
 
     def _nyc(self, p, now, w, h):
-        """Nueva York: crucigrama de palabras en placas negras, zoom a la última al acabar cada línea."""
+        """Nueva York: carteles de palabras en una placa negra; la cámara vive con la línea y la atraviesa al acabar."""
         snap = self.snap
         if not snap or snap["ad"]:
-            self._nyc_bg(p, w, h, now, (0, 0, 1))
+            self._nyc_bg(p, w, h, now, 0.0, (0, 0, 1))
             return self._message(p, "Pon algo en YouTube Music ♪" if not snap else "Anuncio · la música vuelve enseguida",
                                  rgb=(255, 255, 255))
         pos, light = self.position(), self.quality.light
         ref = 0.3 * h  # tamaño al que se dibuja cada palabra (luego se escala con la cámara)
         fm = QFontMetricsF(self._font(ref, True, "heavy"))
-        ws, starts, rects, t_next = self._nyc_line(pos, fm)
-        cam = nyc.camera(pos, starts, rects, t_next, w, h)
-        cx, cy, sc, others = cam
-        self._nyc_bg(p, w, h, now, cam)
+        ws, starts, rects, t_next, line_start, line, nxt = self._nyc_line(pos, fm)
+        view = h * (1 - NYC_BAND)  # la cámara encuadra por encima de la banda de estación
+        cx, cy, sc, others = nyc.camera(pos, starts, rects, t_next, w, view)
+        end = t_next if t_next is not None else line_start + 4.0
+        sc *= 1 + 0.04 * min(1.0, max(0.0, (pos - line_start) / max(0.1, end - line_start)))  # acercamiento lento
+        if not light:
+            cx += math.sin(pos * 0.23) * 0.006 * w / sc  # deriva
+        m = nyc.dive(pos, line_start, t_next)
+        sc *= m
+        self._nyc_bg(p, w, h, now, pos, (cx, cy, sc))
         k = max(0, bisect.bisect_right(starts, pos) - 1)
+        accent = QColor(*nyc.mta(self.rgb))
+        d = now - self.drop_t  # drop: temblor que se apaga en 0,3 s
+        shake = (6 * (1 - d / 0.3) * math.sin(d * 90), 6 * (1 - d / 0.3) * math.cos(d * 77)) if 0 <= d < 0.3 and not light else (0, 0)
+        chorus = line is not None and layout.stanza_of(self.groups, line) in self.chorus
+        p.save()
         p.setRenderHint(QPainter.SmoothPixmapTransform, not light)
-
-        def screen(r):
-            return QRectF((r[0] - cx) * sc + w / 2, (r[1] - cy) * sc + h / 2, r[2] * sc, r[3] * sc)
-
-        for i in range(k + 1):  # placas negras de esquinas redondeadas (las que se tocan se ven unidas)
-            alpha = 1.0 if i == len(rects) - 1 else others
-            if alpha <= 0:
-                continue
-            r = screen(rects[i])
-            m = 0.18 * min(r.width(), r.height())
-            path = QPainterPath()
-            plate = r.adjusted(-m, -m, m, m)
-            path.addRoundedRect(plate, min(48.0, 0.18 * plate.height(), 0.18 * plate.width()),
-                                min(48.0, 0.18 * plate.height(), 0.18 * plate.width()))
-            p.setOpacity(alpha)
-            p.fillPath(path, QColor(0, 0, 0, 235))
-        for i in range(k + 1):
-            alpha = 1.0 if i == len(rects) - 1 else others
-            if alpha <= 0:
-                continue
-            r = screen(rects[i])
-            tw = pos - starts[i]
-            s = 1.0 if light or tw > 0.22 or i == 0 else 1 + 0.12 * (1 - _out_back(min(1.0, tw / 0.22)))
-            grey = nyc.GREYS[min(k - i, 3)] / 255  # blanco sobre negro: la opacidad da el gris
-            pm = self._nyc_word(ws[i], ref)
-            p.save()
-            p.translate(r.center())
-            if rects[i][4]:
-                p.rotate(-90)  # vertical, leyendo hacia arriba
-                tw_, th_ = r.height(), r.width()
-            else:
-                tw_, th_ = r.width(), r.height()
-            p.scale(s, s)
-            p.setOpacity(alpha * grey)
-            p.drawPixmap(QRectF(-tw_ / 2, -th_ / 2, tw_, th_), pm, QRectF(pm.rect()))
-            p.restore()
+        p.translate(w / 2 + shake[0], view / 2 + shake[1])
+        if not light:
+            p.rotate(0.8 * math.sin(pos * 0.17))  # leve balanceo de cámara
+        p.scale(sc, sc)
+        p.translate(-cx, -cy)
+        plate = QColor(5, 5, 5)
+        # la placa: las ya puestas juntas, y la que entra como un sello desde el lado por donde se engancha
+        if k > 0:
+            p.setOpacity(others)
+            p.fillPath(self._nyc_plate(rects, k), plate)
+        r = rects[k]
+        tw = pos - starts[k]
+        grow = 1.0 if light and tw > 0.08 or k == 0 else 1 - 2 ** (-10 * min(1.0, max(0.0, tw / 0.12)))
+        prev = rects[k - 1] if k else r
+        side = "left" if k and r[0] >= prev[0] + prev[2] - 1e-6 else "top"
+        box = QRectF(r[0], r[1], r[2], r[3]).adjusted(-NYC_PAD, -NYC_PAD, NYC_PAD, NYC_PAD)
+        beat = 1.0 if light else 1 + 0.02 * effects.env(now - self.beat_t, 0.04, 0.18)
+        cur = QRectF(box.x(), box.y(), box.width() * (grow if side == "left" else 1), box.height() * (grow if side == "top" else 1))
         p.setOpacity(1.0)
+        p.save()
+        p.translate(box.center())
+        p.scale(beat, beat)
+        p.translate(-box.center())
+        path = QPainterPath()
+        path.addRoundedRect(cur, NYC_RADIUS, NYC_RADIUS)
+        p.fillPath(path, plate)
+        p.restore()
+        if chorus and d >= 0.29:  # estribillo: borde de neón del color de la línea de metro (se enciende parpadeando)
+            flick = (1, 0, 1, 0, 1, 1)[min(5, int(max(0.0, pos - line_start) / 0.22 * 6))]
+            if flick:
+                outline = self._nyc_plate(rects, k + 1)
+                if not light:
+                    glow = QColor(accent)
+                    glow.setAlpha(60)
+                    p.strokePath(outline, QPen(glow, 0.12))
+                p.strokePath(outline, QPen(accent, 0.03))
+        # palabras: las cantadas al 55 %, la que suena se rellena de gris a blanco (karaoke) y entra deslizando
+        for i in range(k + 1):
+            r = rects[i]
+            pm = self._nyc_word(ws[i], ref)
+            t = pos - starts[i]
+            dur = (starts[i + 1] if i + 1 < len(starts) else end) - starts[i]
+            p.save()
+            box = QRectF(r[0], r[1], r[2], r[3])
+            if i == k:
+                p.translate(box.center())
+                p.scale(beat, beat)
+                p.translate(-box.center())
+                if i:
+                    p.setClipRect(cur)
+                    slide = 0.0 if light else 0.25 * (1 - _out_back(min(1.0, max(0.0, (t - 0.04) / 0.16))))
+                    box.translate(-slide if side == "left" else 0, -slide if side == "top" else 0)
+            if r[4]:
+                p.translate(box.center())
+                p.rotate(-90)  # vertical, leyendo hacia arriba
+                box = QRectF(-box.height() / 2, -box.width() / 2, box.height(), box.width())
+            alpha = 1.0 if i == len(rects) - 1 else others
+            if i < k:
+                p.setOpacity(0.55 * alpha)
+                p.drawPixmap(box, pm, QRectF(pm.rect()))
+            else:
+                p.setOpacity(0.55 * alpha)
+                p.drawPixmap(box, pm, QRectF(pm.rect()))
+                fill = 1.0 if i == 0 or dur <= 0 else min(1.0, max(0.0, t / dur))
+                if fill > 0:
+                    p.setOpacity(alpha)
+                    src = QRectF(pm.rect())
+                    p.drawPixmap(QRectF(box.x(), box.y(), box.width() * fill, box.height()), pm,
+                                 QRectF(0, 0, src.width() * fill, src.height()))
+            p.restore()
+        p.restore()
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        self._nyc_signs(p, w, h, snap)
+        if m > 3:  # dentro de la placa: negro (también tapa el cambio de bloque)
+            p.fillRect(self.rect(), QColor(0, 0, 0, round(255 * min(1.0, (m - 3) / 4))))
+        self._nyc_station(p, w, h, snap, accent, nxt)
         if not self.lines and self.status:
-            self._message(p, self.status, y=0.86, alpha=0.5, size=0.022 * h, rgb=(255, 255, 255))
-        d = now - self.drop_t  # drop: la pantalla se invierte un instante
-        if 0 <= d < 0.29:
+            self._message(p, self.status, y=0.80, alpha=0.5, size=0.022 * h, rgb=(255, 255, 255))
+        if 0 <= d < 0.29:  # drop: la pantalla se invierte un instante
             a = min(1.0, d / 0.06) if d < 0.15 else max(0.0, 1 - (d - 0.15) / 0.14)
             p.save()
             p.setCompositionMode(QPainter.CompositionMode_Difference)
-            p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * a * (0.6 if light else 1.0))))  # con rampa
+            p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * a * (0.6 if light else 1.0))))
             p.restore()
 
-    def _nyc_signs(self, p, w, h, snap):
-        """Detalles de Nueva York: círculo de línea de metro con la inicial del artista y letrero con el título."""
-        d = 0.055 * h
-        m = 0.04 * h
-        c = QPointF(m + d / 2, h - m - d / 2)
+    def _nyc_station(self, p, w, h, snap, accent, nxt):
+        """Banda de estación de metro abajo: filete blanco, círculo de línea con la inicial, título y el verso siguiente."""
+        band = NYC_BAND * h
+        y = h - band
+        p.fillRect(QRectF(0, y, w, band), QColor(0, 0, 0))
+        p.fillRect(QRectF(0, y + 0.12 * band, w, max(2.0, 0.035 * band)), QColor(255, 255, 255))
+        d = 0.5 * band
+        c = QPointF(0.03 * h + d / 2, y + 0.58 * band)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255))
+        p.setBrush(accent)
         p.drawEllipse(c, d / 2, d / 2)
-        p.setPen(QColor(0, 0, 0))
+        dark = accent.lightnessF() > 0.6  # amarillo: inicial en negro, como en el metro
+        p.setPen(QColor(0, 0, 0) if dark else QColor(255, 255, 255))
         p.setFont(self._font(0.6 * d, True, "heavy"))
         p.drawText(QRectF(c.x() - d / 2, c.y() - d / 2, d, d), Qt.AlignCenter, (snap["artist"] or "?")[:1].upper())
-        sh = 0.032 * h
-        font = self._font(max(9.0, 0.5 * sh), True)
+        font = self._font(0.36 * band, True)
         fm = QFontMetricsF(font)
-        text = fm.elidedText(snap["title"].upper(), Qt.ElideRight, 0.35 * w)
-        sign = QRectF(c.x() + d / 2 + 12, c.y() - sh / 2, fm.horizontalAdvance(text) + sh, sh)
-        path = QPainterPath()
-        path.addRoundedRect(sign, 4, 4)
-        p.fillPath(path, QColor(0, 0, 0))
-        p.setPen(QPen(QColor(255, 255, 255), 2))
-        p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(sign.adjusted(3, 3, -3, -3), 2, 2)
+        tx = c.x() + d / 2 + 0.4 * d
+        title = fm.elidedText(snap["title"].upper(), Qt.ElideRight, 0.4 * w)
         p.setPen(QColor(255, 255, 255))
         p.setFont(font)
-        p.drawText(sign, Qt.AlignCenter, text)
+        p.drawText(QRectF(tx, y + 0.2 * band, 0.42 * w, 0.76 * band), Qt.AlignVCenter | Qt.AlignLeft, title)
+        if nxt:
+            small = self._font(0.26 * band, False)
+            fs = QFontMetricsF(small)
+            label = fs.elidedText(f"SIGUIENTE  ·  {nxt.upper()}", Qt.ElideRight, 0.44 * w)
+            p.setPen(QColor(255, 255, 255, 150))
+            p.setFont(small)
+            p.drawText(QRectF(w - 0.03 * h - 0.46 * w, y + 0.2 * band, 0.46 * w, 0.76 * band),
+                       Qt.AlignVCenter | Qt.AlignRight, label)
 
     def _pulse_color(self, now):
         """Fondo de Latido: el color de la portada, intenso y oscuro para que se lea el blanco; se aclara con el golpe."""

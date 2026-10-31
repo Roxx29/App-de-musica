@@ -52,6 +52,25 @@ class TestNyc(unittest.TestCase):
         for a, b in zip(end[:3], nyc.frame(rects[-1:], 1600, 900)):
             self.assertAlmostEqual(a, b, places=3)
 
+    def test_paso_entre_lineas_continuo(self):
+        # al acabar una línea entra ×8 en la placa; la siguiente empieza en ×8 y sale: sin salto en la frontera
+        self.assertAlmostEqual(nyc.dive(5.0, 2.0, 5.0), nyc.DIVE_MAX)
+        self.assertAlmostEqual(nyc.dive(5.0, 5.0, 9.0), nyc.DIVE_MAX)
+        self.assertAlmostEqual(nyc.dive(3.5, 2.0, 5.0), 1.0)
+        prev = None
+        for i in range(2000):
+            pos = 4.0 + i * 0.001
+            m = nyc.dive(pos, 2.0 if pos <= 5.0 else 5.0, 5.0 if pos <= 5.0 else 9.0)
+            if prev:
+                self.assertLess(abs(m - prev) / prev, 0.03)
+            prev = m
+
+    def test_tamanos_y_metro(self):
+        self.assertLess(nyc.size(2, 1.0), nyc.size(6, 0.2))  # "me", "por": pequeñas
+        self.assertEqual(nyc.mta((240, 240, 240)), (252, 204, 10))  # gris: amarillo taxi
+        self.assertEqual(nyc.mta((10, 60, 200)), (0, 57, 166))
+        self.assertEqual(nyc.mta((230, 30, 40)), (238, 53, 46))
+
     def test_fondos(self):
         self.assertEqual([nyc.next_bg(b) for b in nyc.BGS], ["cover", "city", "asphalt"])
         self.assertEqual(nyc.next_bg("raro"), "asphalt")
