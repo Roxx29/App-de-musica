@@ -36,3 +36,13 @@ Hechas en la v10: Latido como Pulso + Onda (9) y el estilo Nueva York (10).
    - **Escenario**: rejilla en perspectiva y láseres que destellan con los golpes.
    - **Póster**: se aparta para un modo propio (idea 10).
 10. **Modo nuevo "Nueva York"** (del usuario, a partir de Póster): blanco y negro; las palabras se van juntando unas con otras en distintas direcciones (horizontal y vertical girada 90°, de distintos tamaños, como un crucigrama tipográfico), con placas negras de esquinas redondeadas detrás como en la foto de referencia (MAYAMI / CORRER / GUSTAR); cuando se juntan varias, zoom a la última, que pasa a ser el inicio del siguiente bloque. Fondo que combine con las letras en negro.
+
+## 2026-10-31 (Cinta: los dos aros de altavoz)
+
+11. **Que los aros de las esquinas de Cinta hagan algo** (propuesta de Animaciones, sin decidir):
+    - **Cono que bombea**: cúpula interior que se hunde con el golpe (60 ms) y rebota (220 ms); más fuerte en canciones intensas.
+    - **Polvo que salta**: motas de tinta sobre el aro que saltan con cada golpe y caen; en los drops saltan todas y se tiñen del acento.
+    - **Chladni en el estribillo**: dibujo de líneas dentro del aro que cambia cada 4 golpes.
+    - **Tocadiscos**: el aro de arriba gira como un vinilo (33⅓ o 45 rpm según la intensidad) con una aguja que marca la posición de la canción.
+    - **Diafragma de cristal**: el aro se deforma en ondas al ritmo.
+    - Combinación recomendada: cono en los dos, polvo en el de abajo, Chladni en estribillos y el de arriba como tocadiscos.
