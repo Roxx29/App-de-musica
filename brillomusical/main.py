@@ -13,7 +13,7 @@ from PySide6.QtCore import QCoreApplication, QLockFile, QObject, QSettings, Qt, 
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import artwork, audio, backdrop, beat, color, cover, history, kinetic, lyrics, nyc, quality, transitions, ytm
+from . import artwork, audio, backdrop, beat, bridge, color, cover, history, kinetic, lyrics, nyc, quality, transitions, ytm
 from .color import FALLBACK
 from .constellation import HELP, SEARCHING, LyricsWindow
 from .glow import Glow
@@ -79,6 +79,10 @@ class Controller(QObject):
         self.ytm = ytm.Ytm(DATA)
         self.ytm.snapshot.connect(lambda s: self._source("ytm", s))
         self.ytm_queue = []
+        # extensión de Chrome: la cola de YouTube Music del navegador (con tu cuenta) en el carrusel
+        self.bridge, self.browser = bridge.Bridge(), (None, 0.0)
+        self.bridge.state.connect(self._on_browser)
+        app.aboutToQuit.connect(self.bridge.stop)
         self.ytm.queue.connect(self._on_queue)
         self.window.open_ytm.connect(self.ytm.show)
         self.window.song.connect(self._song)
@@ -112,6 +116,7 @@ class Controller(QObject):
         f.setBold(True)
         show.setFont(f)
         menu.addAction("Abrir YouTube Music", self.ytm.show)
+        menu.addAction("Ver tu playlist (extensión de Chrome)…", self._extension)
         menu.addAction("Pantalla completa", self._fullscreen)
         menu.addSeparator()
         toggle = QAction("Brillo en los bordes", menu, checkable=True, checked=self.glow.enabled)
@@ -230,18 +235,37 @@ class Controller(QObject):
         """Llega una foto de una fuente; manda la integrada salvo que solo suene el navegador."""
         self.sources[name] = snap
         self.active, chosen = ytm.choose(self.sources["ext"], self.sources["ytm"], self.active)
-        self.window.set_queue(self.ytm_queue if self.active == "ytm" else [])  # la cola solo es de la integrada
+        self._show_queue()
         self._on_snapshot(chosen)
 
     def _on_queue(self, queue):
         self.ytm_queue = queue
-        self.window.set_queue(queue if self.active == "ytm" else [])
+        self._show_queue()
+
+    def _on_browser(self, state):
+        self.browser = (state, time.monotonic())
+        self._show_queue()
+
+    def _browser_queue(self):
+        """La cola que manda la extensión, si es reciente y de la canción que suena en el navegador."""
+        state, t = self.browser
+        snap = self.sources["ext"]
+        if state and time.monotonic() - t < 5 and snap and state["now"]["title"] == snap["title"]:
+            return state["queue"]
+        return None
+
+    def _show_queue(self):
+        queue = self.ytm_queue if self.active == "ytm" else self._browser_queue() or []
+        if queue is not self.window.queue:
+            self.window.set_queue(queue)
 
     def _song(self, entry):
         """Clic en el carrusel: de la cola se reproduce; las anteriores se buscan en YouTube Music."""
         kind, it, ref = entry
-        if kind == "next":
+        if kind == "next" and self.active == "ytm":
             self.ytm.command("queue", ref)
+        elif kind == "next":
+            self.bridge.command("queue", ref)  # la extensión la pone en la pestaña de YouTube Music
         elif kind == "now" and self.active == "ytm":
             self.ytm.show()
         elif self.active == "ytm":
@@ -267,6 +291,13 @@ class Controller(QObject):
 
     def _send(self, name, arg=None):
         (self.ytm if self.active == "ytm" else self.watcher).command(name, arg)
+
+    def _extension(self):
+        """Abre la carpeta de la extensión y explica cómo instalarla en Chrome o Edge."""
+        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.dirname(resource("x"))), "extension")))
+        self.tray.showMessage("Extensión de Chrome", "1. Abre chrome://extensions (o edge://extensions)\n"
+                              "2. Activa el Modo de desarrollador\n3. «Cargar descomprimida» y elige la carpeta que se acaba "
+                              "de abrir\n4. Recarga YouTube Music: tu cola aparece en el carrusel")
 
     def _fullscreen(self):
         self._open()

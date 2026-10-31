@@ -70,3 +70,25 @@ def card(pos):
         return None
     c = lambda a, b: min(1.0, max(0.0, (pos - a) / (b - a)))  # noqa: E731
     return 1 - (1 - c(0.0, 0.45)) ** 3, c(0.15, 0.4), c(0.3, 1.6), c(3.0, CARD_END) ** 3
+
+
+# --- aros de altavoz (sin Qt) ---
+def cone(age, strength=1.0):
+    """Escala de la cúpula del altavoz tras un golpe: se hunde en 60 ms y rebota pasándose en 220 ms."""
+    if not 0 <= age < 0.28:
+        return 1.0
+    if age < 0.06:
+        return 1 - 0.15 * strength * (age / 0.06) ** 2
+    t, c = (age - 0.06) / 0.22 - 1, 1.7
+    return 1 - 0.15 * strength * (1 - (1 + (c + 1) * t ** 3 + c * t ** 2))
+
+
+def hop(age, v, flight=0.4):
+    """Altura (0..v) de una mota de polvo que salta con el golpe y cae: parábola de flight·v segundos."""
+    span = flight * v
+    return 4 * v * age * (span - age) / span ** 2 if span > 0 and 0 <= age < span else 0.0
+
+
+def chladni(n, m, x, y):
+    """Figura de Chladni en (x, y) dentro del círculo unidad: las líneas nodales son donde vale ~0."""
+    return math.cos(n * math.atan2(y, x)) * math.sin(m * math.pi * math.hypot(x, y))

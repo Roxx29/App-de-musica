@@ -1,0 +1,90 @@
+"""Puente con la extensión de Chrome: recibe la cola de YouTube Music del navegador y le manda órdenes.
+
+Servidor HTTP mínimo solo en 127.0.0.1 (no sale del PC). Solo acepta peticiones de extensiones del
+navegador (cabecera Origin chrome-extension://, que una web no puede falsificar) y valida todo lo que llega.
+"""
+import json
+import logging
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from PySide6.QtCore import QObject, Signal
+
+PORT = 38917
+MAX_BODY = 256 * 1024
+MAX_ITEMS, MAX_TEXT = 200, 300
+
+log = logging.getLogger(__name__)
+
+
+def _text(v):
+    return v[:MAX_TEXT] if isinstance(v, str) else ""
+
+
+def clean(state):
+    """Lo que manda la extensión, validado: {"now": {title, artist}, "queue": [{title, artist, thumb, selected}]}."""
+    if not isinstance(state, dict):
+        return None
+    now = state.get("now") if isinstance(state.get("now"), dict) else {}
+    queue = state.get("queue") if isinstance(state.get("queue"), list) else []
+    out = []
+    for q in queue[:MAX_ITEMS]:
+        if isinstance(q, dict):
+            thumb = _text(q.get("thumb"))
+            out.append({"title": _text(q.get("title")), "artist": _text(q.get("artist")),
+                        "thumb": thumb if thumb.startswith("https://") else "", "selected": q.get("selected") is True})
+    return {"now": {"title": _text(now.get("title")), "artist": _text(now.get("artist"))}, "queue": out}
+
+
+class Bridge(QObject):
+    state = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.pending, self.lock = [], threading.Lock()
+        bridge = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                if self.path != "/state" or not self.headers.get("Origin", "").startswith("chrome-extension://"):
+                    return self._send(403, {})
+                size = int(self.headers.get("Content-Length") or 0)
+                if not 0 < size <= MAX_BODY:
+                    return self._send(413, {})
+                try:
+                    st = clean(json.loads(self.rfile.read(size)))
+                except ValueError:
+                    st = None
+                if st is None:
+                    return self._send(400, {})
+                bridge.state.emit(st)  # Qt la entrega en su hilo
+                with bridge.lock:
+                    cmds, bridge.pending = bridge.pending, []
+                self._send(200, {"commands": cmds})
+
+            def _send(self, code, body):
+                data = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass  # sin ruido en el log
+
+        try:
+            self.server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        except OSError:
+            log.warning("Puerto %s ocupado: la extensión de Chrome no podrá enviar la cola", PORT)
+            self.server = None
+            return
+        threading.Thread(target=self.server.serve_forever, daemon=True, name="bridge").start()
+
+    def command(self, name, index):
+        with self.lock:
+            self.pending = (self.pending + [{"name": name, "index": int(index)}])[-5:]
+
+    def stop(self):
+        if self.server:
+            self.server.shutdown()

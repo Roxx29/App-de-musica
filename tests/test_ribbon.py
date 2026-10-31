@@ -43,6 +43,15 @@ class TestRibbon(unittest.TestCase):
         self.assertEqual(b[:3], (1.0, 1.0, 1.0))
         self.assertGreater(ribbon.card(3.3)[3], 0.5)  # saliendo
 
+    def test_aros(self):
+        self.assertEqual(ribbon.cone(-1), 1.0)
+        self.assertAlmostEqual(ribbon.cone(0.06), 0.85)  # hundido al máximo
+        self.assertAlmostEqual(ribbon.cone(0.2799999), 1.0, places=3)  # vuelve sin salto
+        self.assertGreater(max(ribbon.cone(0.06 + i * 0.01) for i in range(22)), 1.0)  # se pasa al rebotar
+        self.assertEqual(ribbon.hop(0.5, 1.0), 0.0)
+        self.assertAlmostEqual(ribbon.hop(0.2, 1.0), 1.0)  # lo más alto a mitad del salto
+        self.assertAlmostEqual(ribbon.chladni(2, 1, 0.0, 0.0), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

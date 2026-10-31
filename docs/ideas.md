@@ -39,6 +39,8 @@ Hechas en la v10: Latido como Pulso + Onda (9) y el estilo Nueva York (10).
 
 ## 2026-10-31 (Cinta: los dos aros de altavoz)
 
+Hecha en la v12 (todas las ideas). También la opción B de la idea 8 (extensión de Chrome).
+
 11. **Que los aros de las esquinas de Cinta hagan algo** (propuesta de Animaciones, sin decidir):
     - **Cono que bombea**: cúpula interior que se hunde con el golpe (60 ms) y rebota (220 ms); más fuerte en canciones intensas.
     - **Polvo que salta**: motas de tinta sobre el aro que saltan con cada golpe y caen; en los drops saltan todas y se tiñen del acento.

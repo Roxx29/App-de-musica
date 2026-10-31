@@ -85,11 +85,12 @@ class LyricsWindow(QWidget):
         self.glyphs, self.rib, self.rib_track = {}, None, None  # Cinta: letras sueltas, texto y curva en caché
         self.beat_t = -1e9
         self.beats = deque(maxlen=6)  # golpes recientes: anillos de Latido
+        self.beats_total, self.chladni = 0, {}
         self.nyc_bg = settings.value("nyc_bg", "asphalt")
         if self.nyc_bg not in nyc.BGS:
             self.nyc_bg = "asphalt"
         self.nyc_cache, self.nyc_words, self.grain, self.vignette, self.gray = None, {}, None, None, (None, None)
-        self.nyc_plates, self.nyc_sky = {}, None
+        self.nyc_plates, self.nyc_sky, self.nyc_prev = {}, None, None
         self.wheel = wheel.Wheel()
         self.panels = panels.Panels()
         self.history = history.History()
@@ -292,6 +293,7 @@ class LyricsWindow(QWidget):
         self.backdrop.beat()
         self.beat_t = time.monotonic()
         self.beats.append(self.beat_t)
+        self.beats_total += 1  # Chladni: la figura cambia cada 4 golpes
 
     def set_nyc_bg(self, bg, show=False):
         if bg in nyc.BGS:
@@ -809,7 +811,7 @@ class LyricsWindow(QWidget):
         acc.setHslF(acc.hslHueF(), max(0.5, acc.hslSaturationF()), min(0.42, acc.lightnessF()))
         accent = (acc.red(), acc.green(), acc.blue())
         beat = 0.0 if light else effects.env(now - self.beat_t, 0.04, 0.22)
-        self._speakers(p, w, h, now, beat)
+        self._speakers(p, w, h, now, beat, pos)
         p.setRenderHint(QPainter.SmoothPixmapTransform, not light)
         # la cinta aparece cuando se va el rótulo (si se entra a mitad de canción, ya está)
         fade = min(1.0, max(0.0, (pos - ribbon.CARD_END) / 0.4)) if pos < ribbon.CARD_END + 0.4 else 1.0
@@ -858,22 +860,99 @@ class LyricsWindow(QWidget):
             x += gap
         p.setOpacity(1.0)
 
-    def _speakers(self, p, w, h, now, beat):
-        """Los dos aros del altavoz del vídeo: laten con el golpe y sueltan una onda fina."""
+    def _speakers(self, p, w, h, now, beat, pos):
+        """Los dos aros del altavoz: arriba un tocadiscos, abajo un cono que bombea con polvo que salta y,
+        en los estribillos, figuras de Chladni; los dos se deforman en ondas como un diafragma."""
+        light = self.quality.light
+        ink = QColor(*ribbon.INK)
+        r, thick = 0.085 * h, 0.035 * h
+        intense = 1.5 if self.mood == "intense" else 1.0
         age = now - self.beat_t
         p.setOpacity(1 - 0.7 * max(self.panels.left, self.panels.right))  # no compiten con los paneles
-        for cx, cy in ((0.12 * w, 0.22 * h), (0.80 * w, 0.76 * h)):
-            r = 0.085 * h
-            thick = 0.035 * h * (1 + 0.08 * beat)
+        snap = self.snap
+        for corner, (cx, cy) in enumerate(((0.12 * w, 0.22 * h), (0.80 * w, 0.76 * h))):
+            c = QPointF(cx, cy)
+            # diafragma: el aro ondula con el golpe (3 lóbulos que giran)
+            ring = QPainterPath()
+            n = 24 if light else 48
+            for i in range(n + 1):
+                th = 2 * math.pi * i / n
+                rr = r * (1 + 0.04 * beat * math.sin(3 * th + now * 5.0))
+                pt = QPointF(cx + rr * math.cos(th), cy + rr * math.sin(th))
+                ring.moveTo(pt) if i == 0 else ring.lineTo(pt)
+            delay = ribbon.cone(age - 0.04, intense)  # el aro sigue a la cúpula 40 ms después
             p.setBrush(Qt.NoBrush)
-            p.setPen(QPen(QColor(*ribbon.INK), thick))
-            p.drawEllipse(QPointF(cx, cy), r, r)
-            if age < 0.7 and not self.quality.light:
-                t = age / 0.7
-                p.setPen(QPen(QColor(*ribbon.INK, round(160 * (1 - t))), 1.5))
-                rr = r + thick / 2 + 0.06 * h * (1 - (1 - t) ** 2)
-                p.drawEllipse(QPointF(cx, cy), rr, rr)
+            p.setPen(QPen(ink, thick * (2 - delay)))
+            p.drawPath(ring)
+            inner = r - thick / 2
+            if corner == 0:  # tocadiscos: surcos que giran (33⅓ rpm, 45 si va intensa) y aguja según la canción
+                p.save()
+                p.translate(c)
+                p.rotate(pos * (270 if intense > 1 else 200))  # sale de la posición: la pausa lo para
+                p.setPen(QPen(ink, 1.5))
+                for k, rad in enumerate((0.35, 0.5, 0.65, 0.8)):
+                    rr = inner * rad
+                    p.drawArc(QRectF(-rr, -rr, 2 * rr, 2 * rr), k * 90 * 16, 40 * 16)
+                p.setPen(Qt.NoPen)
+                p.setBrush(ink)
+                p.drawEllipse(QPointF(0, 0), 0.12 * inner, 0.12 * inner)
+                p.restore()
+                frac = min(1.0, pos / snap["duration"]) if snap and snap["duration"] else 0.0
+                a = 2 * math.pi * frac - math.pi / 2
+                p.setPen(QPen(ink, 1.5, Qt.SolidLine, Qt.RoundCap))
+                p.drawLine(QPointF(cx + (r + thick) * math.cos(a), cy + (r + thick) * math.sin(a)),
+                           QPointF(cx + (r + thick * 1.8) * math.cos(a), cy + (r + thick * 1.8) * math.sin(a)))
+                continue
+            # cono: la cúpula se hunde con el golpe y rebota
+            dome = 0.4 * r * ribbon.cone(age, intense)
+            p.setPen(Qt.NoPen)
+            p.setBrush(ink)
+            p.drawEllipse(c, dome, dome)
+            # figuras de Chladni dentro del aro durante el estribillo (cambian cada 4 golpes)
+            line = self.line_index(pos)
+            if line >= 0 and layout.stanza_of(self.groups, line) in self.chorus:
+                pm = self._chladni(self.beats_total // 4)
+                p.setOpacity(p.opacity() * min(1.0, max(0.0, (pos - self.lines[line][0]) / 0.6)))
+                p.save()
+                clip = QPainterPath()
+                clip.addEllipse(c, inner * 0.95, inner * 0.95)
+                p.setClipPath(clip)
+                p.drawPixmap(QRectF(cx - inner, cy - inner, 2 * inner, 2 * inner), pm, QRectF(pm.rect()))
+                p.restore()
+                p.setOpacity(1 - 0.7 * max(self.panels.left, self.panels.right))
+            # polvo: motas sobre el aro que saltan con el golpe; en un drop saltan todas y las altas se tiñen
+            drop = 0 <= now - self.drop_t < 0.4
+            acc = QColor(*self.rgb)
+            acc.setHslF(acc.hslHueF(), max(0.5, acc.hslSaturationF()), min(0.42, acc.lightnessF()))
+            rnd = self._rand(4242, 72)
+            motes = 8 if light else 24
+            hops = []
+            for i in range(motes):
+                th = math.pi * (1.1 + 0.8 * rnd[i]) + (rnd[24 + i] - 0.5) * 0.3  # sobre la mitad de arriba
+                v = (0.5 + 0.5 * rnd[48 + i]) * (1.6 if drop else 1.0) * 0.6 * r  # fijo durante el salto
+                lift = ribbon.hop((now - self.drop_t) if drop else age, v / (0.6 * r), 0.4) * 0.6 * r
+                hops.append((lift, th, i))
+            top = sorted(hops, reverse=True)[:3] if drop else []
+            for lift, th, i in hops:
+                rr = r + thick / 2 + 2 + lift
+                p.setBrush(acc if (lift, th, i) in top else ink)
+                p.drawEllipse(QPointF(cx + rr * math.cos(th), cy + rr * math.sin(th)), 1.6, 1.6)
         p.setOpacity(1.0)
+
+    def _chladni(self, k):
+        """Figura de Chladni k (n, m distintos), dibujada una vez en 96 px y reutilizada."""
+        n, m = (2, 3, 4, 5, 6, 3)[k % 6], (2, 3, 2, 3, 4, 4)[k % 6]
+        if (n, m) not in self.chladni:
+            size = 96
+            img = QImage(size, size, QImage.Format_ARGB32)
+            img.fill(Qt.transparent)
+            for y in range(size):
+                for x in range(size):
+                    u, v = 2 * x / (size - 1) - 1, 2 * y / (size - 1) - 1
+                    if u * u + v * v <= 1 and abs(ribbon.chladni(n, m, u, v)) < 0.09:
+                        img.setPixelColor(x, y, QColor(*ribbon.INK, 200))
+            self.chladni[(n, m)] = QPixmap.fromImage(img)
+        return self.chladni[(n, m)]
 
     def _tide(self, p, w, h, now, beat, n):
         """Marea de tinta abajo (el agua del vídeo): dos ondas sumadas que crecen con el golpe."""
@@ -964,6 +1043,8 @@ class LyricsWindow(QWidget):
         rects = nyc.place(info, zlib.crc32(f"{title}|{key[0]}".encode()), first)
         nxt = " ".join(lyrics.words(self.lines[tl[k + 1]][1])) if k + 1 < len(tl) else ""
         data = (ws, starts, rects, t_next, starts[0] + 1e-3, key[0], nxt)
+        if self.nyc_cache and self.nyc_cache[1] is self.lines:
+            self.nyc_prev = self.nyc_cache[2]  # el bloque anterior queda detrás, como un fantasma
         self.nyc_cache = (key, self.lines, data)
         self.nyc_plates = {}
         for x in [x for x in self.nyc_words if x[0] not in ws]:  # se queda la que pasa al bloque nuevo
@@ -1137,6 +1218,9 @@ class LyricsWindow(QWidget):
         self._nyc_bg(p, w, h, now, pos, (cx, cy, sc))
         k = max(0, bisect.bisect_right(starts, pos) - 1)
         accent = QColor(*nyc.mta(self.rgb))
+        if not light:
+            self._nyc_rain(p, w, h, pos)
+            self._nyc_ghost(p, w, view, ref)
         d = now - self.drop_t  # drop: temblor que se apaga en 0,3 s
         shake = (6 * (1 - d / 0.3) * math.sin(d * 90), 6 * (1 - d / 0.3) * math.cos(d * 77)) if 0 <= d < 0.3 and not light else (0, 0)
         chorus = line is not None and layout.stanza_of(self.groups, line) in self.chorus
@@ -1178,9 +1262,25 @@ class LyricsWindow(QWidget):
                     glow.setAlpha(60)
                     p.strokePath(outline, QPen(glow, 0.12))
                 p.strokePath(outline, QPen(accent, 0.03))
+        open_t = pos - line_start  # al abrir el bloque, líneas finas que encuadran las palabras (títulos de Saul Bass)
+        if not light and 0 <= open_t < 0.9:
+            reach = min(1.0, open_t / 0.3) * 40
+            fade = 1 - max(0.0, (open_t - 0.5) / 0.4)
+            p.setOpacity(0.35 * fade)
+            p.setPen(QPen(QColor(255, 255, 255), 1.0 / sc))
+            for r in rects[:k + 1]:
+                for x in (r[0] - NYC_PAD, r[0] + r[2] + NYC_PAD):
+                    p.drawLine(QPointF(x, r[1] - reach), QPointF(x, r[1] + r[3] + reach))
+                for y in (r[1] - NYC_PAD, r[1] + r[3] + NYC_PAD):
+                    p.drawLine(QPointF(r[0] - reach, y), QPointF(r[0] + r[2] + reach, y))
+            p.setOpacity(1.0)
         # palabras: las cantadas al 55 %, la que suena se rellena de gris a blanco (karaoke) y entra deslizando
+        intro = line is None and pos < 2.5 and not light  # antes de la primera línea: título de cine
         for i in range(k + 1):
             r = rects[i]
+            if intro and i == 0:
+                self._nyc_title(p, r, ws[0], pos)
+                continue
             pm = self._nyc_word(ws[i], ref)
             t = pos - starts[i]
             dur = (starts[i + 1] if i + 1 < len(starts) else end) - starts[i]
@@ -1225,6 +1325,61 @@ class LyricsWindow(QWidget):
             p.setCompositionMode(QPainter.CompositionMode_Difference)
             p.fillRect(self.rect(), QColor(255, 255, 255, round(255 * a * (0.6 if light else 1.0))))
             p.restore()
+
+    def _nyc_rain(self, p, w, h, pos):
+        """Lluvia fina a 29° (la cuadrícula de Manhattan) cuando la canción va tranquila; sale de la posición."""
+        if self.mood != "calm":
+            return
+        p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+        rnd = self._rand(2929, 100)
+        dx, dy = math.sin(math.radians(29)), math.cos(math.radians(29))
+        for i in range(50):
+            ln = (0.03 + 0.04 * rnd[i]) * h
+            y = ((pos * (0.9 + 0.5 * rnd[50 + i]) * h + rnd[i] * h * 3) % (h + ln)) - ln
+            x = rnd[50 + i] * (w + 0.6 * h) - y * dx / dy
+            p.drawLine(QPointF(x, y), QPointF(x + ln * dx, y + ln * dy))
+
+    def _nyc_ghost(self, p, w, view, ref):
+        """El bloque anterior detrás, enorme y casi transparente (profundidad sin coste de desenfoque)."""
+        prev = self.nyc_prev
+        if not prev:
+            return
+        ws, _, rects = prev[:3]
+        cx, cy, sc = nyc.frame(rects, w, view)
+        p.save()
+        p.translate(w / 2, view / 2)
+        p.scale(sc * 1.6, sc * 1.6)
+        p.translate(-cx, -cy)
+        p.setOpacity(0.05)
+        for word, r in zip(ws, rects):
+            pm = self._nyc_word(word, ref)
+            box = QRectF(r[0], r[1], r[2], r[3])
+            if r[4]:
+                p.save()
+                p.translate(box.center())
+                p.rotate(-90)
+                p.drawPixmap(QRectF(-r[3] / 2, -r[2] / 2, r[3], r[2]), pm, QRectF(pm.rect()))
+                p.restore()
+            else:
+                p.drawPixmap(box, pm, QRectF(pm.rect()))
+        p.restore()
+
+    def _nyc_title(self, p, r, text, pos):
+        """Título de entrada: las letras empiezan separadas y se juntan en 2 s (como en los créditos de cine)."""
+        e = 1 - (1 - min(1.0, pos / 2.0)) ** 4
+        font = QFont(self._font(100, True, "heavy"))
+        font.setLetterSpacing(QFont.PercentageSpacing, 100 + 60 * (1 - e))
+        fm = QFontMetricsF(font)
+        p.save()
+        p.translate(r[0] + r[2] / 2, r[1] + r[3] / 2)
+        k = r[3] / fm.height()
+        p.scale(k, k)
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255))
+        p.setOpacity(min(1.0, pos / 0.4))
+        tw = fm.horizontalAdvance(text)
+        p.drawText(QPointF(-tw / 2, fm.ascent() - fm.height() / 2), text)
+        p.restore()
 
     def _nyc_station(self, p, w, h, snap, accent, nxt):
         """Banda de estación de metro abajo: filete blanco, círculo de línea con la inicial, título y el verso siguiente."""
