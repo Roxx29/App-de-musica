@@ -80,7 +80,8 @@ class LyricsWindow(QWidget):
         self.style_setting = settings.value("lyrics_style", "constellation")  # lo elegido (puede ser "auto")
         if self.style_setting not in kinetic.SETTINGS:
             self.style_setting = "constellation"
-        self.style = self.style_setting if self.style_setting != "auto" else "constellation"  # lo que se pinta
+        # lo que se pinta: Automático y Loco empiezan en el principal y cambian después
+        self.style = self.style_setting if self.style_setting not in ("auto", "loco") else "constellation"
         self.kin = {}  # Latido: (efecto, fuente) elegidos al aparecer cada línea
         self.glyphs, self.rib, self.rib_track = {}, None, None  # Cinta: letras sueltas, texto y curva en caché
         self.beat_t = -1e9
@@ -89,6 +90,7 @@ class LyricsWindow(QWidget):
         # Loco: estrofa vista, estrofas desde el último cambio, último cambio, siguiente y transición en curso
         self.loco_k, self.loco_n, self.loco_t, self.loco_last, self.loco_seq = None, 0, -1e9, None, 0
         self.loco_next = self.loco_tr = None
+        self.loco_cache = {}
         self.nyc_bg = settings.value("nyc_bg", "asphalt")
         if self.nyc_bg not in nyc.BGS:
             self.nyc_bg = "asphalt"
@@ -1024,11 +1026,11 @@ class LyricsWindow(QWidget):
     # --- modo Loco ---
     def _loco_check(self, now):
         """¿Toca cambiar de estilo? Por estrofa nueva (o estribillo) o por drop; deja preparado el cambio."""
-        if self.style_setting != "loco" or not self.snap or self.snap["ad"] or not self.lines or self.loco_tr:
+        if self.style_setting != "loco" or not self.snap or self.snap["ad"] or self.loco_tr:
             return
         pos = self.position()
-        line = self.line_index(pos)
-        k = layout.stanza_of(self.groups, line) if line >= 0 else None
+        line = self.line_index(pos) if self.lines else -1
+        k = layout.stanza_of(self.groups, line) if line >= 0 else None  # sin letra: solo cambian los drops
         reason = None
         if now - self.drop_t < 0.5 and self.drop_t > self.loco_t:
             reason = "drop"
@@ -1058,13 +1060,13 @@ class LyricsWindow(QWidget):
         self._paint(q, now)
         q.end()
         self._apply_style(style)
-        self.loco_tr = (kind, now, pm, self.loco_seq)
+        self.loco_tr = (kind, now, pm, self.loco_seq, loco.duration(kind, self.mood))  # duración fija al empezar
+        self.loco_cache = {}
         self.loco_last, self.loco_t, self.loco_n, self.loco_seq = kind, now, 0, self.loco_seq + 1
 
     def _loco_draw(self, p, now):
         """La instantánea del estilo anterior, recortada o transformada encima del nuevo según la transición."""
-        kind, t0, pm, seed = self.loco_tr
-        dur = loco.duration(kind, self.mood)
+        kind, t0, pm, seed, dur = self.loco_tr
         pr = (now - t0) / dur
         if pr >= 1:
             self.loco_tr = None
@@ -1114,7 +1116,8 @@ class LyricsWindow(QWidget):
                 p.setPen(QPen(edge, 4 if kind == "iris" else 10))
             p.setBrush(Qt.NoBrush)
             p.setOpacity(1.0)
-            p.drawPath(hole)
+            if hole.boundingRect().width() > 2:  # el iris aún cerrado no deja un punto en el centro
+                p.drawPath(hole)
         elif kind == "shards":  # cristal roto: grietas y trozos que salen volando
             if pr < 0.12:
                 p.drawPixmap(full, pm, src)
@@ -1132,6 +1135,8 @@ class LyricsWindow(QWidget):
                     path = QPainterPath()
                     path.addPolygon([QPointF(x * w, y * h) for x, y in tri])
                     path.closeSubpath()
+                    box = path.boundingRect()
+                    k = pm.width() / w  # de la ventana a la instantánea (DPR o media resolución)
                     p.save()
                     p.setOpacity(alpha)
                     p.translate(cx + dx * w, cy + dy * h)
@@ -1139,7 +1144,7 @@ class LyricsWindow(QWidget):
                     p.scale(sc, sc)
                     p.translate(-cx, -cy)
                     p.setClipPath(path)
-                    p.drawPixmap(full, pm, src)
+                    p.drawPixmap(box, pm, QRectF(box.x() * k, box.y() * k, box.width() * k, box.height() * k))
                     p.restore()
         elif kind == "swirl":  # remolino: gira y se hunde en el centro
             e = loco.in_cubic(loco.clamp((pr - 0.1) / 0.75))
@@ -1163,21 +1168,23 @@ class LyricsWindow(QWidget):
             p.resetTransform()
             p.drawPixmap(full, pm, src)
         elif kind == "mosaic":  # se pixela y los bloques se apagan en orden aleatorio
-            block = 1 + 47 * loco.clamp(pr / 0.45) ** 2
-            small = pm.scaled(max(1, round(w / block)), max(1, round(h / block)), Qt.IgnoreAspectRatio,
-                              Qt.FastTransformation)
+            # se pixela y los bloques se apagan en orden aleatorio; todo en una imagen pequeña y un solo dibujado
+            block = max(2, round(1 + 47 * loco.clamp(pr / 0.45) ** 2))
+            gone = min(30, max(0, round(((pr - 0.45) / 0.55 + 0.08 * beat) * 30))) if pr >= 0.45 else 0
+            key = (block, gone)
+            if key not in self.loco_cache:
+                small = pm.scaled(max(1, round(w / block)), max(1, round(h / block)), Qt.IgnoreAspectRatio,
+                                  Qt.FastTransformation).toImage().convertToFormat(QImage.Format_ARGB32)
+                if gone:
+                    rnd = random.Random(seed * 13 + 1)
+                    for j in range(small.height()):
+                        for i in range(small.width()):
+                            if rnd.random() * 30 < gone:
+                                small.setPixelColor(i, j, QColor(0, 0, 0, 0))
+                self.loco_cache = {key: small}  # solo la del paso actual
+            small = self.loco_cache[key]
             p.setRenderHint(QPainter.SmoothPixmapTransform, False)
-            if pr < 0.45:
-                p.drawPixmap(full, small, QRectF(small.rect()))
-            else:
-                rnd = self._rand(seed * 13 + 1, 2000)
-                cols, rows = small.width(), small.height()
-                gone = (pr - 0.45) / 0.55 + 0.08 * beat
-                bw, bh = w / cols, h / rows
-                for j in range(rows):
-                    for i in range(cols):
-                        if rnd[(j * cols + i) % 2000] > gone:
-                            p.drawPixmap(QRectF(i * bw, j * bh, bw + 1, bh + 1), small, QRectF(i, j, 1, 1))
+            p.drawImage(full, small, QRectF(small.rect()))
         elif kind == "shear":  # cizalla: bandas que salen en sentidos alternos
             for i in range(5):
                 f = loco.out_cubic(loco.clamp((pr - 0.04 * i) / 0.8))
@@ -1202,7 +1209,8 @@ class LyricsWindow(QWidget):
                 p.drawPixmap(full, pm, src)
                 p.restore()
         elif kind == "glitch":  # franjas que saltan con el golpe y se tiñen
-            rnd = self._rand(seed * 7 + int(now * 16), 48)
+            gen = random.Random(seed * 7 + int(now * 16))  # cambia 16 veces por segundo (sin guardar nada)
+            rnd = [gen.random() for _ in range(48)]
             amp = (0.04 + 0.12 * pr + 0.05 * beat) * w
             for i in range(12):
                 y0 = i * h / 12
