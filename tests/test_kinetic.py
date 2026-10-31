@@ -35,7 +35,8 @@ class TestKinetic(unittest.TestCase):
         self.assertEqual(kinetic.next_style("constellation"), "kinetic")
         self.assertEqual(kinetic.next_style("kinetic"), "ribbon")
         self.assertEqual(kinetic.next_style("ribbon"), "nyc")
-        self.assertEqual(kinetic.next_style("nyc"), "auto")
+        self.assertEqual(kinetic.next_style("nyc"), "loco")
+        self.assertEqual(kinetic.next_style("loco"), "auto")
         self.assertEqual(kinetic.next_style("auto"), "constellation")
 
     def test_estilo_por_genero(self):

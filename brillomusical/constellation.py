@@ -16,7 +16,7 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QFontInfo, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from . import (backdrop, cover, effects, history, kinetic, layout, lyrics, media, nyc, panels, quality, ribbon,
+from . import (backdrop, cover, effects, history, kinetic, layout, loco, lyrics, media, nyc, panels, quality, ribbon,
                transitions, wheel, ytm)
 from .color import FALLBACK
 
@@ -86,6 +86,9 @@ class LyricsWindow(QWidget):
         self.beat_t = -1e9
         self.beats = deque(maxlen=6)  # golpes recientes: anillos de Latido
         self.beats_total, self.chladni = 0, {}
+        # Loco: estrofa vista, estrofas desde el último cambio, último cambio, siguiente y transición en curso
+        self.loco_k, self.loco_n, self.loco_t, self.loco_last, self.loco_seq = None, 0, -1e9, None, 0
+        self.loco_next = self.loco_tr = None
         self.nyc_bg = settings.value("nyc_bg", "asphalt")
         if self.nyc_bg not in nyc.BGS:
             self.nyc_bg = "asphalt"
@@ -161,6 +164,7 @@ class LyricsWindow(QWidget):
 
     def set_lyrics(self, status, lines):
         self.status, self.lines = status, lines
+        self.loco_k, self.loco_n, self.loco_next = None, 0, None  # canción nueva: Loco vuelve a contar
         self.times = [t for t, _ in lines]
         self.groups = layout.stanzas(lines)
         self.chorus = layout.chorus(lines, self.groups)  # estribillos: transición de impacto en Automática
@@ -284,7 +288,7 @@ class LyricsWindow(QWidget):
         """El fondo Al ritmo y los automáticos necesitan el medidor aunque el borde esté apagado."""
         return (self.isVisible() and not self.isMinimized()
                 and (self.backdrop.setting in ("beat", "auto") or self.trans_setting == "auto"
-                     or self.style != "constellation"))
+                     or self.style != "constellation" or self.style_setting == "loco"))
 
     def set_energy(self, e):
         self.backdrop.energy = e
@@ -307,7 +311,9 @@ class LyricsWindow(QWidget):
         if setting in kinetic.SETTINGS:
             self.style_setting = setting
             self.settings.setValue("lyrics_style", setting)
-            if setting != "auto":  # en Automático sigue el que hay hasta que llegue el género
+            self.loco_next = self.loco_tr = None  # un cambio a mano corta lo que hubiera en marcha
+            self.loco_k, self.loco_n, self.loco_t = None, 0, time.monotonic()
+            if setting not in ("auto", "loco"):  # Automático y Loco siguen con el que hay hasta su próximo cambio
                 self._apply_style(setting)
             if show:
                 self.toast(f"Estilo: {kinetic.SETTING_NAMES[setting]}")
@@ -321,8 +327,9 @@ class LyricsWindow(QWidget):
 
     def _apply_style(self, style):
         self.style = style
-        self.nyc_words.clear()  # pixmaps grandes de Nueva York: fuera al cambiar de estilo
-        self.nyc_sky = None
+        if self.style_setting != "loco":  # en Loco se quedan: volver a Nueva York no da tirones
+            self.nyc_words.clear()  # pixmaps grandes de Nueva York: fuera al cambiar de estilo
+            self.nyc_sky = None
         # al volver a Constelación no hay transición desde una estrofa vieja
         self.shown, self.last_items, self.old_items, self.leaving_now = None, [], [], []
         self.update()
@@ -402,7 +409,7 @@ class LyricsWindow(QWidget):
 
     def wheel_value(self, action):
         style = kinetic.STYLE_NAMES[self.style]
-        return {"style": f"Automático · {style}" if self.style_setting == "auto" else style, "transition": transitions.SETTING_NAMES[self.trans_setting],
+        return {"style": {"auto": f"Automático · {style}", "loco": f"Loco · {style}"}.get(self.style_setting, style), "transition": transitions.SETTING_NAMES[self.trans_setting],
                 "bg": nyc.BG_NAMES[self.nyc_bg] if self.style == "nyc" else backdrop.NAMES[self.backdrop.setting], "cover": cover.NAMES[self.cover.mode],
                 "quality": quality.NAMES[self.quality.setting],
                 "fullscreen": "salir" if self.isFullScreen() else "activar", "ytm": "abrir"}[action]
@@ -524,6 +531,7 @@ class LyricsWindow(QWidget):
 
     def resizeEvent(self, e):
         self.bg = self.nebula = None
+        self.loco_tr = None  # la instantánea es del tamaño de antes
         self.glyphs.clear()
         self.nyc_words.clear()  # Nueva York dibuja cada palabra a 0,3 del alto
         self.labels.clear()  # los tamaños de letra dependen de la altura
@@ -621,7 +629,13 @@ class LyricsWindow(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)  # halo, nebulosa y etiquetas escaladas o en posición decimal
+        if self.animating:
+            self._loco_check(now)
+            if self.loco_next:
+                self._loco_begin(now)
         self._paint(p, now)
+        if self.loco_tr:
+            self._loco_draw(p, now)
         w = self.width()
         if now - self.toast_t < self.toast_secs and self.wheel.open == 0:  # aviso (con la rueda, su etiqueta) en una pastilla oscura (legible sobre portadas claras)
             pm = self._text_pixmap(self.toast_text, 13, False, (255, 255, 255), False)
@@ -1006,6 +1020,207 @@ class LyricsWindow(QWidget):
             p.setFont(self._font(0.03 * h, False))
             p.drawText(QPointF(tx, top + len(rows) * lh + 0.045 * h), artist)
             p.setOpacity(1.0)
+
+    # --- modo Loco ---
+    def _loco_check(self, now):
+        """¿Toca cambiar de estilo? Por estrofa nueva (o estribillo) o por drop; deja preparado el cambio."""
+        if self.style_setting != "loco" or not self.snap or self.snap["ad"] or not self.lines or self.loco_tr:
+            return
+        pos = self.position()
+        line = self.line_index(pos)
+        k = layout.stanza_of(self.groups, line) if line >= 0 else None
+        reason = None
+        if now - self.drop_t < 0.5 and self.drop_t > self.loco_t:
+            reason = "drop"
+        elif k != self.loco_k:
+            prev, self.loco_k = self.loco_k, k
+            if prev is None or k is None or k < prev or k > prev + 1:  # salto o instrumental: vuelve a contar
+                self.loco_n = 0
+                return
+            self.loco_n += 1
+            reason = "chorus" if k in self.chorus and prev not in self.chorus else "stanza"
+        if reason and loco.decide(reason, self.mood, self.loco_n, now - self.loco_t):
+            seed = zlib.crc32(f"{self.snap['title']}|{k}|{self.loco_seq}".encode())
+            kind = loco.pick(reason if reason != "stanza" else self.mood, self.mood, self.loco_last, seed,
+                             self.quality.light)
+            self.loco_next = (loco.next_style(kinetic.STYLES, self.style, seed), kind, reason)
+
+    def _loco_begin(self, now):
+        """En el mismo fotograma: instantánea del estilo que se va (sin parpadeo) y cambio al nuevo."""
+        style, kind, _ = self.loco_next
+        self.loco_next = None
+        dpr = self.devicePixelRatioF() * (0.5 if self.quality.light else 1.0)  # Ligera: media resolución
+        pm = QPixmap(round(self.width() * dpr), round(self.height() * dpr))
+        pm.setDevicePixelRatio(dpr)
+        q = QPainter(pm)
+        q.setRenderHint(QPainter.Antialiasing)
+        q.setRenderHint(QPainter.SmoothPixmapTransform)
+        self._paint(q, now)
+        q.end()
+        self._apply_style(style)
+        self.loco_tr = (kind, now, pm, self.loco_seq)
+        self.loco_last, self.loco_t, self.loco_n, self.loco_seq = kind, now, 0, self.loco_seq + 1
+
+    def _loco_draw(self, p, now):
+        """La instantánea del estilo anterior, recortada o transformada encima del nuevo según la transición."""
+        kind, t0, pm, seed = self.loco_tr
+        dur = loco.duration(kind, self.mood)
+        pr = (now - t0) / dur
+        if pr >= 1:
+            self.loco_tr = None
+            return
+        w, h = self.width(), self.height()
+        full = QRectF(0, 0, w, h)
+        src = QRectF(pm.rect())
+        c = QPointF(w / 2, h / 2)
+        half = math.hypot(w, h) / 2
+        beat = effects.env(now - self.beat_t, 0.02, 0.12)
+        energy = self.backdrop.energy
+        p.save()
+        if kind in ("iris", "liquid", "shock"):  # se ve el nuevo dentro de una forma que crece
+            hole = QPainterPath()
+            n = 96
+            for i in range(n + 1):
+                th = 2 * math.pi * i / n
+                if kind == "iris":
+                    r = loco.iris(th, pr, beat)
+                elif kind == "liquid":
+                    r = loco.blob(th, pr, now, energy, beat)
+                else:
+                    r = loco.out_expo(pr) * 1.05
+                pt = QPointF(c.x() + half * r * math.cos(th), c.y() + half * r * math.sin(th))
+                hole.moveTo(pt) if i == 0 else hole.lineTo(pt)
+            clip = QPainterPath()
+            clip.addRect(full)
+            clip = clip.subtracted(hole)
+            p.setClipPath(clip)
+            p.drawPixmap(full, pm, src)
+            p.setClipping(False)
+            edge = QColor(*self.rgb) if kind == "liquid" else QColor(255, 255, 255)
+            if kind == "shock":  # frente de la onda: anillo que se adelgaza y refracción falsa detrás
+                ring = half * loco.out_expo(pr) * 1.05
+                band = QPainterPath()
+                band.addEllipse(c, ring + 60 * (1 - pr), ring + 60 * (1 - pr))
+                inner = QPainterPath()
+                inner.addEllipse(c, ring, ring)
+                p.setClipPath(band.subtracted(inner))
+                p.setOpacity(0.8 * (1 - pr))
+                p.drawPixmap(full.translated(12 * (1 - pr), 0), pm, src)
+                p.setClipping(False)
+                edge.setAlphaF(0.9 * (1 - pr))
+                p.setPen(QPen(edge, 3 + 6 * (1 - pr)))
+            else:
+                edge.setAlphaF(0.8 * (1 - pr))
+                p.setPen(QPen(edge, 4 if kind == "iris" else 10))
+            p.setBrush(Qt.NoBrush)
+            p.setOpacity(1.0)
+            p.drawPath(hole)
+        elif kind == "shards":  # cristal roto: grietas y trozos que salen volando
+            if pr < 0.12:
+                p.drawPixmap(full, pm, src)
+                p.setPen(QPen(QColor(255, 255, 255, round(200 * pr / 0.12)), 1.5))
+                for tri in loco.shards(seed):
+                    poly = [QPointF(x * w, y * h) for x, y in tri]
+                    p.drawPolyline(poly + poly[:1])
+            else:
+                for i, tri in enumerate(loco.shards(seed)):
+                    dx, dy, rot, sc, alpha = loco.shard_state(tri, i, pr, energy)
+                    if alpha <= 0:
+                        continue
+                    cx = sum(v[0] for v in tri) / 3 * w
+                    cy = sum(v[1] for v in tri) / 3 * h
+                    path = QPainterPath()
+                    path.addPolygon([QPointF(x * w, y * h) for x, y in tri])
+                    path.closeSubpath()
+                    p.save()
+                    p.setOpacity(alpha)
+                    p.translate(cx + dx * w, cy + dy * h)
+                    p.rotate(rot)
+                    p.scale(sc, sc)
+                    p.translate(-cx, -cy)
+                    p.setClipPath(path)
+                    p.drawPixmap(full, pm, src)
+                    p.restore()
+        elif kind == "swirl":  # remolino: gira y se hunde en el centro
+            e = loco.in_cubic(loco.clamp((pr - 0.1) / 0.75))
+            p.setOpacity(1 - 0.7 * e if pr < 0.85 else (1 - pr) / 0.15 * 0.3)
+            p.translate(c)
+            p.rotate(-8 * min(1.0, pr / 0.1) + 540 * e + 20 * beat)
+            p.scale(1 - e, 1 - e)
+            p.translate(-c)
+            p.drawPixmap(full, pm, src)
+        elif kind == "blinds":  # persiana inclinada: franjas que se cierran escalonadas
+            p.translate(c)
+            p.rotate(18)
+            p.translate(-c)
+            span = math.hypot(w, h) * 1.2
+            band = span / 10
+            path = QPainterPath()
+            for i, wid in enumerate(loco.blinds(min(1.0, pr + 0.04 * beat))):
+                if wid > 0:
+                    path.addRect(QRectF(c.x() - span / 2 + i * band, c.y() - span / 2, band * wid, span))
+            p.setClipPath(path)
+            p.resetTransform()
+            p.drawPixmap(full, pm, src)
+        elif kind == "mosaic":  # se pixela y los bloques se apagan en orden aleatorio
+            block = 1 + 47 * loco.clamp(pr / 0.45) ** 2
+            small = pm.scaled(max(1, round(w / block)), max(1, round(h / block)), Qt.IgnoreAspectRatio,
+                              Qt.FastTransformation)
+            p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+            if pr < 0.45:
+                p.drawPixmap(full, small, QRectF(small.rect()))
+            else:
+                rnd = self._rand(seed * 13 + 1, 2000)
+                cols, rows = small.width(), small.height()
+                gone = (pr - 0.45) / 0.55 + 0.08 * beat
+                bw, bh = w / cols, h / rows
+                for j in range(rows):
+                    for i in range(cols):
+                        if rnd[(j * cols + i) % 2000] > gone:
+                            p.drawPixmap(QRectF(i * bw, j * bh, bw + 1, bh + 1), small, QRectF(i, j, 1, 1))
+        elif kind == "shear":  # cizalla: bandas que salen en sentidos alternos
+            for i in range(5):
+                f = loco.out_cubic(loco.clamp((pr - 0.04 * i) / 0.8))
+                p.save()
+                p.setOpacity(1 - loco.clamp((pr - 0.7) / 0.3))
+                p.setClipRect(QRectF(0, i * h / 5, w, h / 5 + 1))
+                p.translate((1 if i % 2 else -1) * (w * 1.15 * f + 30 * beat), 0)
+                p.shear(0.15 * f * (1 if i % 2 else -1), 0)
+                p.drawPixmap(full, pm, src)
+                p.restore()
+        elif kind == "door":  # puerta: las dos mitades se abren hacia los lados con perspectiva
+            f = loco.in_out_cubic(pr)
+            for side in (-1, 1):
+                p.save()
+                p.setOpacity(1 - loco.clamp((pr - 0.6) / 0.4))
+                p.setClipRect(QRectF(0 if side < 0 else w / 2, 0, w / 2, h))
+                edge = 0 if side < 0 else w
+                p.translate(edge + side * (w / 2) * f, h / 2)
+                p.scale(1 - 0.5 * f, 1 + 0.15 * f)
+                p.shear(0, -0.25 * f * side)
+                p.translate(-edge, -h / 2)
+                p.drawPixmap(full, pm, src)
+                p.restore()
+        elif kind == "glitch":  # franjas que saltan con el golpe y se tiñen
+            rnd = self._rand(seed * 7 + int(now * 16), 48)
+            amp = (0.04 + 0.12 * pr + 0.05 * beat) * w
+            for i in range(12):
+                y0 = i * h / 12
+                p.save()
+                p.setOpacity(1 - pr)
+                p.setClipRect(QRectF(0, y0, w, h / 12 + 1))
+                p.drawPixmap(full.translated((rnd[i] - 0.5) * 2 * amp, 0), pm, src)
+                p.setCompositionMode(QPainter.CompositionMode_Plus)
+                p.setOpacity(0.35 * (1 - pr))
+                p.fillRect(QRectF(0, y0, w, h / 12 + 1), QColor(255, 40, 80) if rnd[24 + i] > 0.5 else QColor(40, 220, 255))
+                p.restore()
+        else:  # zoom con fundido (Ligera)
+            p.setOpacity(1 - pr)
+            p.translate(c)
+            p.scale(1 + 0.3 * pr, 1 + 0.3 * pr)
+            p.translate(-c)
+            p.drawPixmap(full, pm, src)
+        p.restore()
 
     # --- Nueva York ---
     def _nyc_line(self, pos, fm):
